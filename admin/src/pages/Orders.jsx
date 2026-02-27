@@ -17,7 +17,12 @@ const mockOrders = [
 
 const ORDER_STATUSES = ['CONFIRMED', 'IN_WAREHOUSE', 'SHIPPED', 'FULFILLED', 'REJECTED'];
 
-const statusClass = (s) => s?.toLowerCase().replace('_', '_') || 'pending';
+const normalizeStatus = (s) => (s === 'Cancelled' || s === 'REJECTED') ? 'REJECTED' : s;
+
+const statusClass = (s) => {
+  const normalized = normalizeStatus(s);
+  return normalized?.toLowerCase().replace('_', '_') || 'pending';
+};
 
 export default function Orders() {
   const [orders, setOrders] = useState([]);
@@ -93,7 +98,7 @@ export default function Orders() {
     const name = o.userId?.name || '';
     const matchSearch = name.toLowerCase().includes(search.toLowerCase()) ||
       (o.id || '').toLowerCase().includes(search.toLowerCase());
-    const matchStatus = statusFilter === 'all' || o.status === statusFilter;
+    const matchStatus = statusFilter === 'all' || normalizeStatus(o.status) === statusFilter;
     return matchSearch && matchStatus;
   });
 
@@ -109,7 +114,7 @@ export default function Orders() {
 
       {/* Stats Row */}
       <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(5,1fr)', marginBottom: 24 }}>
-        {[ 'All', ...ORDER_STATUSES ].map(s => {
+        {['All', ...ORDER_STATUSES].map(s => {
           const label = s === 'All' ? 'All' : s.replace(/_/g, ' ').toLowerCase().replace(/(^|\s)\S/g, t => t.toUpperCase());
           const count = s === 'All' ? orders.length : orders.filter(o => o.status === s).length;
           return (
@@ -120,7 +125,7 @@ export default function Orders() {
               onClick={() => setStatusFilter(s === 'All' ? 'all' : s)}
             >
               <div className="stat-value" style={{ fontSize: 22 }}>
-                {count}
+                {s === 'All' ? orders.length : orders.filter(o => normalizeStatus(o.status) === s).length}
               </div>
               <div className="stat-label">{label}</div>
             </div>
@@ -173,15 +178,15 @@ export default function Orders() {
                       {new Date(order.orderDate).toLocaleDateString('en-IN')}
                     </td>
                     <td>
-                      <span className={`status-badge ${statusClass(order.status)}`}>{order.status}</span>
+                      <span className={`status-badge ${statusClass(order.status)}`}>{normalizeStatus(order.status)}</span>
                     </td>
                     <td>
                       <select
                         className="filter-select"
                         style={{ padding: '5px 8px', fontSize: 12 }}
-                        value={order.status}
+                        value={normalizeStatus(order.status)}
                         onChange={e => handleStatusUpdate(order._id, e.target.value)}
-                        disabled={updatingId === order._id}
+                        disabled={updatingId === order._id || order.status === 'Cancelled'}
                       >
                         {ORDER_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
@@ -201,8 +206,8 @@ export default function Orders() {
             {totalPages > 1 && (
               <div className="pagination">
                 {Array.from({ length: totalPages }, (_, i) => (
-                  <button key={i} className={`page-btn ${page === i+1 ? 'active' : ''}`} onClick={() => setPage(i+1)}>
-                    {i+1}
+                  <button key={i} className={`page-btn ${page === i + 1 ? 'active' : ''}`} onClick={() => setPage(i + 1)}>
+                    {i + 1}
                   </button>
                 ))}
               </div>
@@ -223,7 +228,7 @@ export default function Orders() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
               {[
                 ['Customer', selected.userId?.name || 'Unknown'],
-                ['Status', selected.status],
+                ['Status', normalizeStatus(selected.status)],
                 ['Order Date', new Date(selected.orderDate).toLocaleDateString('en-IN')],
                 ['Total Amount', `₹${selected.totalAmount?.toLocaleString()}`],
               ].map(([label, val]) => (
@@ -250,8 +255,9 @@ export default function Orders() {
             <div className="modal-footer" style={{ marginTop: 20 }}>
               <select
                 className="filter-select"
-                value={selected.status}
+                value={normalizeStatus(selected.status)}
                 onChange={e => handleStatusUpdate(selected._id, e.target.value)}
+                disabled={selected.status === 'Cancelled'}
               >
                 {ORDER_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
               </select>

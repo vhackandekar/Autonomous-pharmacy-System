@@ -17,6 +17,7 @@ import { useAuth } from '../context/AuthContext';
 
 
 const statusClass = (s) => {
+  const normalized = (s === 'Cancelled' || s === 'REJECTED') ? 'REJECTED' : s;
   const m = {
     CONFIRMED: 'confirmed',
     REJECTED: 'rejected',
@@ -24,7 +25,7 @@ const statusClass = (s) => {
     SHIPPED: 'shipped',
     FULFILLED: 'delivered'
   };
-  return m[s] || 'pending';
+  return m[normalized] || 'pending';
 };
 
 const CustomTooltip = ({ active, payload, label }) => {
@@ -45,7 +46,6 @@ export default function Dashboard() {
   const { theme } = useTheme();
   const { token } = useAuth();
   const [stats, setStats] = useState(null);
-  const [orders, setOrders] = useState([]);
   const [lowStockMedicines, setLowStockMedicines] = useState([]);
   const [salesData, setSalesData] = useState([]);
   const [categoryData, setCategoryData] = useState([]);
@@ -94,11 +94,7 @@ export default function Dashboard() {
         console.log('✅ Dashboard data fetched successfully');
         setStats(statsRes.data);
 
-        const sortedOrders = ordersRes.data
-          ?.sort((a, b) => new Date(b.orderDate) - new Date(a.orderDate))
-          ?.slice(0, 6);
-
-        setOrders(sortedOrders || []);
+        const allOrders = ordersRes.data || [];
 
         const lowStock = medicinesRes.data.filter(m => m.stock < 20);
         setLowStockMedicines(lowStock);
@@ -138,8 +134,9 @@ export default function Dashboard() {
 
         // NEW: Process Order Status
         const statusMap = {};
-        ordersRes.data.forEach(order => {
-          statusMap[order.status] = (statusMap[order.status] || 0) + 1;
+        allOrders.forEach(order => {
+          const status = (order.status === 'Cancelled' || order.status === 'REJECTED') ? 'REJECTED' : order.status;
+          statusMap[status] = (statusMap[status] || 0) + 1;
         });
         setStatusData(() => Object.keys(statusMap).map(name => ({ name, value: statusMap[name] })));
 
@@ -171,6 +168,20 @@ export default function Dashboard() {
 
         setMonthlyProfitData(monthsToShow.map(key => profitMonthlyMap[key]));
 
+        const activeOrders = allOrders.filter(o => o.status !== 'Cancelled' && o.status !== 'REJECTED');
+
+        // Calculate totals for stats cards from active orders
+        const revenue = activeOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+        const profit = activeOrders.reduce((sum, order) => {
+          return sum + (order.items?.reduce((pSum, item) => {
+            const price = item.medicineId?.price || 0;
+            const cost = item.medicineId?.costPrice || 0;
+            return pSum + ((price - cost) * item.quantity);
+          }, 0) || 0);
+        }, 0);
+
+        setStats(prev => ({ ...prev, totalSales: revenue, totalProfit: profit }));
+
       } catch (error) {
         console.error("Dashboard fetch error:", error);
         toast.error("Failed to load dashboard data");
@@ -195,10 +206,6 @@ export default function Dashboard() {
           getMedicines(),
         ]);
         setStats(statsRes.data);
-        const sortedOrders = ordersRes.data
-          ?.sort((a, b) => new Date(b.orderDate) - new Date(a.orderDate))
-          ?.slice(0, 6);
-        setOrders(sortedOrders || []);
         const lowStock = medicinesRes.data.filter(m => m.stock < 20);
         setLowStockMedicines(lowStock);
       } catch (err) {
@@ -213,21 +220,8 @@ export default function Dashboard() {
     return () => { socket.disconnect(); };
   }, []);
 
-  const totalSales = orders.reduce(
-    (sum, order) => sum + (order.totalAmount || 0),
-    0
-  );
-
-  const totalProfit = orders.reduce((sum, order) => {
-    const orderProfit = order.items?.reduce((pSum, item) => {
-      // Use price and costPrice from the populated medicineId
-      const price = item.medicineId?.price || 0;
-      const cost = item.medicineId?.costPrice || 0;
-      return pSum + ((price - cost) * item.quantity);
-    }, 0) || 0;
-    return sum + orderProfit;
-  }, 0);
-
+  const totalSales = stats?.totalSales || 0;
+  const totalProfit = stats?.totalProfit || 0;
   const profitMargin = totalSales > 0 ? ((totalProfit / totalSales) * 100).toFixed(1) : 0;
 
   if (loading) return (
@@ -427,41 +421,7 @@ export default function Dashboard() {
 
         </div>
 
-        {/* Recent Orders */}
-        <div className="card" style={{ gridColumn: '1 / span 2' }}>
-          <div className="card-header">
-            <h3><ShoppingCart size={16} /> Recent Orders</h3>
-            <Link to="/orders" className="btn btn-secondary btn-sm">View All Orders</Link>
-          </div>
-          <div className="card-body">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Order ID</th>
-                  <th>Customer</th>
-                  <th>Items</th>
-                  <th>Total</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {orders.map((order, i) => (
-                  <tr key={order._id || i}>
-                    <td>#{order._id?.slice(-6).toUpperCase()}</td>
-                    <td>{order.userId?.name || "Unknown User"}</td>
-                    <td>{order.items?.length || 1}</td>
-                    <td>₹{order.totalAmount?.toLocaleString()}</td>
-                    <td>
-                      <span className={`status-badge ${statusClass(order.status)}`}>
-                        {order.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+
 
 
       </div>

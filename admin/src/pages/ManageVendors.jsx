@@ -1,18 +1,28 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Building2, Mail, Phone, MapPin, X, Clock, CreditCard, ChevronRight, Package, ShoppingBag, CheckCircle, AlertCircle, Sparkles, RefreshCw, Bot, Send } from 'lucide-react';
-import { getVendors, addVendor, deleteVendor, getPurchaseOrders, getAIRestockDraft, createPurchaseOrder, cancelPurchaseOrder } from '../utils/api';
+import { useLocation } from 'react-router-dom';
+import { Plus, Trash2, Building2, Mail, Phone, MapPin, X, Clock, CreditCard, ChevronRight, Package, ShoppingBag, CheckCircle, AlertCircle, Sparkles, RefreshCw, Bot, Send, Search } from 'lucide-react';
+import { getVendors, addVendor, deleteVendor, getPurchaseOrders, getAIRestockDraft, createPurchaseOrder, cancelPurchaseOrder, getMedicines, addMedicineToVendor, removeMedicineFromVendor } from '../utils/api';
 import toast from 'react-hot-toast';
 import { usePollingData } from '../hooks/usePollingData';
 
 export default function ManageVendors() {
-  const [activeTab, setActiveTab] = useState('vendors');
+  const location = useLocation();
+  const [activeTab, setActiveTab] = useState(location.state?.tab || 'vendors');
   const [vendors, setVendors] = useState([]);
   const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', phone: '', address: '', averageLeadTime: 3 });
   const [saving, setSaving] = useState(false);
   const [aiDraft, setAiDraft] = useState(null);
+  const [draftItems, setDraftItems] = useState([]);
   const [generatingDraft, setGeneratingDraft] = useState(false);
+
+  // Vendor Medicine Management States
+  const [showMedModal, setShowMedModal] = useState(false);
+  const [selectedVendorForMeds, setSelectedVendorForMeds] = useState(null);
+  const [allMedicines, setAllMedicines] = useState([]);
+  const [medSearch, setMedSearch] = useState('');
+  const [managingMeds, setManagingMeds] = useState(false);
 
   const { data: vendorsData, loading: vLoading, refetch: vRefetch } = usePollingData(
     () => getVendors().then(res => res.data),
@@ -35,6 +45,13 @@ export default function ManageVendors() {
   useEffect(() => {
     if (poData && Array.isArray(poData)) setPurchaseOrders(poData);
   }, [poData]);
+
+  // If we land on ai-restock tab, trigger the draft automatically
+  useEffect(() => {
+    if (activeTab === 'ai-restock' && !aiDraft) {
+      handleGenerateDraft();
+    }
+  }, [activeTab]);
 
   const handleAdd = async (e) => {
     e.preventDefault();
@@ -70,6 +87,7 @@ export default function ManageVendors() {
     try {
       const res = await getAIRestockDraft();
       setAiDraft(res.data);
+      setDraftItems(res.data.items || []);
       if (res.data.items?.length === 0) {
         toast.success(res.data.message || 'Inventory is healthy!');
       }
@@ -88,12 +106,12 @@ export default function ManageVendors() {
     try {
       const payload = {
         vendorId: aiDraft.vendor._id,
-        items: aiDraft.items.map(item => ({
+        items: draftItems.map(item => ({
           medicineId: item.medicineId,
           quantity: item.suggestedQuantity,
           costPrice: item.costPrice
         })),
-        totalCost: aiDraft.totalCost,
+        totalCost: draftItems.reduce((sum, item) => sum + (item.suggestedQuantity * item.costPrice), 0),
         status: 'Pending',
         paymentStatus: 'Pending'
       };
@@ -110,14 +128,70 @@ export default function ManageVendors() {
     }
   };
 
+  const updateDraftItemQty = (idx, val) => {
+    const newItems = [...draftItems];
+    newItems[idx].suggestedQuantity = Number(val);
+    setDraftItems(newItems);
+  };
+
+  const removeDraftItem = (idx) => {
+    setDraftItems(prev => prev.filter((_, i) => i !== idx));
+  };
+
   const handleCancelPO = async (id) => {
     if (!confirm('Are you sure you want to cancel this purchase order? An email notification will be sent to the vendor.')) return;
     try {
       await cancelPurchaseOrder(id);
+      // Immediately remove from UI for better responsiveness
+      setPurchaseOrders(prev => prev.filter(o => o._id !== id));
       toast.success('Purchase order cancelled');
       poRefetch();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to cancel order');
+    }
+  };
+
+  const openMedicineManager = async (vendor) => {
+    setSelectedVendorForMeds(vendor);
+    setShowMedModal(true);
+    setManagingMeds(true);
+    try {
+      const res = await getMedicines();
+      setAllMedicines(res.data);
+    } catch {
+      toast.error('Failed to load medicines');
+    } finally {
+      setManagingMeds(false);
+    }
+  };
+
+  const handleAddMedToVendor = async (medicine) => {
+    if (!selectedVendorForMeds) return;
+    try {
+      const res = await addMedicineToVendor(selectedVendorForMeds._id, [medicine._id]);
+      setSelectedVendorForMeds(res.data);
+      // Update global vendors list to reflect change
+      setVendors(prev => prev.map(v => v._id === res.data._id ? res.data : v));
+      toast.success(`${medicine.name} added to ${selectedVendorForMeds.name}`);
+    } catch (err) {
+      const msg = err.response?.data?.error || err.message || 'Failed to add medicine';
+      toast.error(msg);
+      console.error('Medicine Add Error:', err);
+    }
+  };
+
+  const handleRemoveMedFromVendor = async (medicineId) => {
+    if (!selectedVendorForMeds) return;
+    try {
+      const res = await removeMedicineFromVendor(selectedVendorForMeds._id, medicineId);
+      setSelectedVendorForMeds(res.data);
+      // Update global vendors list
+      setVendors(prev => prev.map(v => v._id === res.data._id ? res.data : v));
+      toast.success('Medicine removed from supplier list');
+    } catch (err) {
+      const msg = err.response?.data?.error || err.message || 'Failed to remove medicine';
+      toast.error(msg);
+      console.error('Medicine Remove Error:', err);
     }
   };
 
@@ -203,8 +277,14 @@ export default function ManageVendors() {
                 <div className="stat-box">
                   <Package size={14} />
                   <div className="stat-label">Items</div>
-                  <div className="stat-value">Procurement</div>
+                  <div className="stat-value">{vendor.medicines?.length || 0} Products</div>
                 </div>
+              </div>
+
+              <div className="card-actions-row">
+                <button className="btn btn-secondary btn-full" onClick={() => openMedicineManager(vendor)}>
+                  <Plus size={14} /> Manage Products
+                </button>
               </div>
             </div>
           ))}
@@ -245,6 +325,22 @@ export default function ManageVendors() {
             </div>
           ) : (
             <div className="draft-container">
+              <div className="decision-logic-banner">
+                <div className="logic-icon"><Bot size={20} /></div>
+                <div className="logic-text">
+                  <h4>AI Decision Logic</h4>
+                  <p>{aiDraft.reasoning}</p>
+                </div>
+                <div className="logic-comparison">
+                  {aiDraft.allEvaluations?.map((ev, i) => (
+                    <div key={i} className={`comparison-item ${ev.isBest ? 'best' : ''}`}>
+                      <span className="ev-name">{ev.name}</span>
+                      <span className="ev-stats">{ev.matched} items matched • {ev.leadTime}d lead</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               <div className="draft-header-card card">
                 <div className="ai-badge">
                   <Sparkles size={14} /> AI GENERATED DRAFT
@@ -253,18 +349,18 @@ export default function ManageVendors() {
                   <Building2 size={24} />
                   <div>
                     <h4>Primary Vendor: {aiDraft.vendor.name}</h4>
-                    <p>{aiDraft.vendor.email}</p>
+                    <p>{aiDraft.vendor.email} • Estimated Lead Time: {aiDraft.vendor.leadTime} Days</p>
                   </div>
                 </div>
                 <div className="total-summary">
-                  <div className="label">Total Order Value</div>
-                  <div className="value">{formatCurrency(aiDraft.totalCost)}</div>
+                  <div className="label">Current Order Value</div>
+                  <div className="value">{formatCurrency(draftItems.reduce((sum, item) => sum + (item.suggestedQuantity * item.costPrice), 0))}</div>
                 </div>
                 <div className="draft-actions">
                   <button className="btn btn-secondary" onClick={handleGenerateDraft}>
                     <RefreshCw size={14} /> Re-Draft
                   </button>
-                  <button className="btn btn-primary" onClick={handleApprovePO} disabled={saving}>
+                  <button className="btn btn-primary" onClick={handleApprovePO} disabled={saving || draftItems.length === 0}>
                     {saving ? 'Processing...' : 'Approve & Send PO'} <Send size={14} style={{ marginLeft: 8 }} />
                   </button>
                 </div>
@@ -272,7 +368,7 @@ export default function ManageVendors() {
 
               <div className="card mt-20">
                 <div className="card-header">
-                  <h3>Restock Items ({aiDraft.items.length})</h3>
+                  <h3>Editable Restock Items ({draftItems.length})</h3>
                 </div>
                 <div className="card-body">
                   <table className="data-table">
@@ -281,20 +377,34 @@ export default function ManageVendors() {
                         <th>Product</th>
                         <th>Current Stock</th>
                         <th>Reorder Level</th>
-                        <th>Suggested Order</th>
+                        <th style={{ width: '150px' }}>Order Quantity</th>
                         <th>Cost Price (Unit)</th>
                         <th>Line Total</th>
+                        <th style={{ width: '50px' }}></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {aiDraft.items.map((item, idx) => (
+                      {draftItems.map((item, idx) => (
                         <tr key={idx}>
                           <td className="font-bold">{item.name}</td>
                           <td>{item.currentStock}</td>
                           <td style={{ color: 'var(--accent-red)' }}>{item.reorderLevel}</td>
-                          <td style={{ color: 'var(--brand)', fontWeight: 700 }}>+{item.suggestedQuantity}</td>
+                          <td>
+                            <input
+                              type="number"
+                              className="qty-edit-input"
+                              value={item.suggestedQuantity}
+                              onChange={(e) => updateDraftItemQty(idx, e.target.value)}
+                              min="1"
+                            />
+                          </td>
                           <td>{formatCurrency(item.costPrice)}</td>
                           <td className="font-bold">{formatCurrency(item.costPrice * item.suggestedQuantity)}</td>
+                          <td>
+                            <button className="btn-icon-danger" onClick={() => removeDraftItem(idx)} title="Remove from order">
+                              <Trash2 size={14} />
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -325,38 +435,40 @@ export default function ManageVendors() {
                   </tr>
                 </thead>
                 <tbody>
-                  {purchaseOrders.map((po) => (
-                    <tr key={po._id}>
-                      <td>#{po._id.slice(-6).toUpperCase()}</td>
-                      <td>{po.vendorId?.name}</td>
-                      <td>{new Date(po.orderDate).toLocaleDateString()}</td>
-                      <td>{po.items?.length || 0} Products</td>
-                      <td className="font-bold">{formatCurrency(po.totalCost)}</td>
-                      <td>
-                        <span className={`status-badge ${po.status?.toLowerCase() === 'delivered' ? 'confirmed' :
+                  {purchaseOrders
+                    .filter(po => po.status !== 'Cancelled')
+                    .map((po) => (
+                      <tr key={po._id}>
+                        <td>#{po._id.slice(-6).toUpperCase()}</td>
+                        <td>{po.vendorId?.name}</td>
+                        <td>{new Date(po.orderDate).toLocaleDateString()}</td>
+                        <td>{po.items?.length || 0} Products</td>
+                        <td className="font-bold">{formatCurrency(po.totalCost)}</td>
+                        <td>
+                          <span className={`status-badge ${po.status?.toLowerCase() === 'delivered' ? 'confirmed' :
                             po.status?.toLowerCase() === 'cancelled' ? 'cancelled' : 'pending'
-                          }`}>
-                          {po.status || 'Pending'}
-                        </span>
-                      </td>
-                      <td>
-                        <span className={`status-badge ${po.paymentStatus?.toLowerCase() === 'paid' ? 'processing' : 'rejected'}`}>
-                          {po.paymentStatus || 'Pending'}
-                        </span>
-                      </td>
-                      <td>
-                        {po.status !== 'Cancelled' && po.status !== 'Delivered' && (
-                          <button
-                            className="btn-text-danger"
-                            onClick={() => handleCancelPO(po._id)}
-                            title="Cancel Order"
-                          >
-                            <X size={14} /> Cancel
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                            }`}>
+                            {po.status || 'Pending'}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`status-badge ${po.paymentStatus?.toLowerCase() === 'paid' ? 'processing' : 'rejected'}`}>
+                            {po.paymentStatus || 'Pending'}
+                          </span>
+                        </td>
+                        <td>
+                          {po.status !== 'Cancelled' && po.status !== 'Delivered' && (
+                            <button
+                              className="btn-text-danger"
+                              onClick={() => handleCancelPO(po._id)}
+                              title="Cancel Order"
+                            >
+                              <X size={14} /> Cancel
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
                   {purchaseOrders.length === 0 && (
                     <tr>
                       <td colSpan="8" style={{ textAlign: 'center', padding: '40px' }}>
@@ -412,6 +524,75 @@ export default function ManageVendors() {
         </div>
       )
       }
+
+      {showMedModal && selectedVendorForMeds && (
+        <div className="modal-overlay" onClick={() => setShowMedModal(false)}>
+          <div className="modal modal-lg" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="header-with-subtitle">
+                <h3>Manage Products: {selectedVendorForMeds.name}</h3>
+                <p>Assign medicines that can be ordered from this supplier</p>
+              </div>
+              <button className="icon-btn" onClick={() => setShowMedModal(false)}><X size={18} /></button>
+            </div>
+
+            <div className="medicine-manager-layout">
+              <div className="assigned-medicines">
+                <div className="section-title">Supplied Products ({selectedVendorForMeds.medicines?.length || 0})</div>
+                <div className="med-list-container">
+                  {selectedVendorForMeds.medicines?.map(med => (
+                    <div key={med._id} className="med-item assigned">
+                      <div className="med-info">
+                        <span className="med-name">{med.name}</span>
+                        <span className="med-meta">{med.dosage} • {med.unitType}</span>
+                      </div>
+                      <button className="remove-med-btn" onClick={() => handleRemoveMedFromVendor(med._id)}>
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                  {(!selectedVendorForMeds.medicines || selectedVendorForMeds.medicines.length === 0) && (
+                    <div className="empty-mini">No medicines assigned yet.</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="available-medicines">
+                <div className="section-title">Available Inventory</div>
+                <div className="search-box-mini">
+                  <Search size={14} />
+                  <input
+                    placeholder="Search medicines to add..."
+                    value={medSearch}
+                    onChange={e => setMedSearch(e.target.value)}
+                  />
+                </div>
+                <div className="med-list-container">
+                  {allMedicines
+                    .filter(m => m.name.toLowerCase().includes(medSearch.toLowerCase()))
+                    .filter(m => !selectedVendorForMeds.medicines?.find(vm => vm._id === m._id))
+                    .map(med => (
+                      <div key={med._id} className="med-item available">
+                        <div className="med-info">
+                          <span className="med-name">{med.name}</span>
+                          <span className="med-meta">{med.dosage}</span>
+                        </div>
+                        <button className="add-med-btn" onClick={() => handleAddMedToVendor(med)}>
+                          <Plus size={14} />
+                        </button>
+                      </div>
+                    ))
+                  }
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-footer">
+              <button className="btn btn-primary" onClick={() => setShowMedModal(false)}>Done</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style jsx>{`
         .manage-vendors-page {
@@ -672,6 +853,91 @@ export default function ManageVendors() {
 
         .mt-20 { margin-top: 20px; }
         .font-bold { font-weight: 700; }
+
+        .decision-logic-banner {
+          background: var(--bg-hover);
+          border: 1px dashed var(--brand);
+          border-radius: 12px;
+          padding: 20px;
+          display: flex;
+          align-items: flex-start;
+          gap: 20px;
+          margin-bottom: 20px;
+        }
+
+        .logic-icon {
+          background: var(--brand);
+          color: white;
+          padding: 10px;
+          border-radius: 10px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .logic-text h4 { font-size: 14px; color: var(--brand); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 1px; }
+        .logic-text p { font-size: 14px; color: var(--text-primary); line-height: 1.5; }
+
+        .logic-comparison {
+          margin-left: auto;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          padding-left: 20px;
+          border-left: 1px solid var(--border);
+        }
+
+        .comparison-item {
+          padding: 4px 12px;
+          border-radius: 6px;
+          background: var(--bg-primary);
+          display: flex;
+          flex-direction: column;
+          font-size: 11px;
+          opacity: 0.6;
+        }
+
+        .comparison-item.best {
+          background: var(--brand-dim);
+          border: 1px solid var(--brand);
+          opacity: 1;
+        }
+
+        .comparison-item .ev-name { font-weight: 700; color: var(--text-primary); }
+        .comparison-item .ev-stats { color: var(--text-muted); }
+
+        .qty-edit-input {
+          width: 80px;
+          padding: 6px 10px;
+          border: 1px solid var(--border);
+          border-radius: 6px;
+          background: var(--bg-primary);
+          color: var(--brand);
+          font-weight: 700;
+          text-align: center;
+        }
+
+        .qty-edit-input:focus {
+          border-color: var(--brand);
+          outline: none;
+          box-shadow: 0 0 0 2px var(--brand-dim);
+        }
+
+        .btn-icon-danger {
+          background: none;
+          border: none;
+          color: var(--accent-red);
+          cursor: pointer;
+          opacity: 0.7;
+          padding: 4px;
+          border-radius: 4px;
+          transition: all 0.2s;
+        }
+
+        .btn-icon-danger:hover {
+          background: rgba(239, 68, 68, 0.1);
+          opacity: 1;
+        }
         .btn-text-danger {
           background: none;
           border: none;
@@ -689,6 +955,75 @@ export default function ManageVendors() {
         .btn-text-danger:hover {
           background: rgba(239, 68, 68, 0.1);
         }
+
+        .card-actions-row {
+          margin-top: auto;
+          padding-top: 12px;
+        }
+
+        .btn-full { width: 100%; justify-content: center; }
+
+        .modal-lg { max-width: 800px; width: 90%; }
+        
+        .header-with-subtitle p { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+
+        .medicine-manager-layout {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 24px;
+          padding: 0 24px 24px;
+          height: 450px;
+        }
+
+        .section-title { font-size: 12px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 12px; letter-spacing: 0.5px; }
+
+        .med-list-container {
+          background: var(--bg-primary);
+          border: 1px solid var(--border);
+          border-radius: 12px;
+          height: calc(100% - 30px);
+          overflow-y: auto;
+          display: flex;
+          flex-direction: column;
+        }
+
+        .available-medicines .med-list-container { height: calc(100% - 75px); }
+
+        .search-box-mini {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          background: var(--bg-primary);
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          padding: 8px 12px;
+          margin-bottom: 12px;
+        }
+
+        .search-box-mini input { background: none; border: none; font-size: 13px; color: var(--text-primary); width: 100%; }
+
+        .med-item {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 12px 16px;
+          border-bottom: 1px solid var(--border);
+          transition: background 0.2s;
+        }
+
+        .med-item:hover { background: var(--bg-secondary); }
+
+        .med-info { display: flex; flex-direction: column; gap: 2px; }
+        .med-name { font-size: 14px; font-weight: 600; }
+        .med-meta { font-size: 11px; color: var(--text-muted); }
+
+        .remove-med-btn { background: none; border: none; color: #ef4444; opacity: 0.6; cursor: pointer; }
+        .remove-med-btn:hover { opacity: 1; }
+
+        .add-med-btn { background: var(--brand-dim); color: var(--brand); border: none; border-radius: 4px; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+        .add-med-btn:hover { background: var(--brand); color: white; }
+
+        .empty-mini { padding: 40px 20px; text-align: center; color: var(--text-muted); font-size: 13px; }
       `}</style>
     </div>
   );

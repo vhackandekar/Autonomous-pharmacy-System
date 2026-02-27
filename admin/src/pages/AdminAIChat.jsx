@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, BarChart, Calendar, Package, AlertTriangle, TrendingUp, RefreshCw, FileText, ChevronRight, Building2, ShoppingBag, Download, Volume2, ArrowRight, PieChart, Sparkles } from 'lucide-react';
+import { Send, Bot, User, BarChart, Calendar, Package, AlertTriangle, TrendingUp, RefreshCw, FileText, ChevronRight, ShoppingBag, Download, Volume2, ArrowRight, PieChart } from 'lucide-react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import { jsPDF } from 'jspdf';
@@ -16,8 +16,7 @@ const quickActions = [
     { label: 'Profit Analysis', icon: TrendingUp, color: '#f59e0b' },
     { label: 'Low Stock', icon: AlertTriangle, color: '#ef4444' },
     { label: 'Top Selling Medicines', icon: BarChart, color: '#3b82f6' },
-    { label: 'Smart Restock Draft', icon: Sparkles, color: '#ec4899', action: 'restock' },
-    { label: 'Manage Vendors', icon: Building2, color: '#10b981', action: 'vendors' },
+    { label: 'Order Low Stock Medicines', icon: ShoppingBag, color: '#10b981' },
 ];
 
 export default function AdminAIChat() {
@@ -32,7 +31,7 @@ export default function AdminAIChat() {
     ]);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
-    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+    const [isFullScreen, setIsFullScreen] = useState(false);
     const messagesEndRef = useRef(null);
     const reportRefs = useRef({});
 
@@ -244,24 +243,28 @@ export default function AdminAIChat() {
     };
 
     return (
-        <div className="ai-chat-page">
-            <div className="page-header">
-                <div className="header-info">
-                    <h1>Pharmacy Admin Intelligence</h1>
-                    <p>Real-time data analysis and business-focused decision support</p>
+        <div className={`ai-chat-page ${isFullScreen ? 'full-screen-mode' : ''}`}>
+            {!isFullScreen && (
+                <div className="page-header">
+                    <div className="header-info">
+                        <h1>Pharmacy Admin Intelligence</h1>
+                        <p>Real-time data analysis and business-focused decision support</p>
+                    </div>
+                    <div className="header-status">
+                        <div className="status-dot online"></div>
+                        <span>AI Assistant Online</span>
+                    </div>
                 </div>
-                <div className="header-status">
-                    <div className="status-dot online"></div>
-                    <span>AI Assistant Online</span>
-                </div>
-            </div>
+            )}
 
-            <div className={`ai-chat-layout ${!isSidebarOpen ? 'sidebar-collapsed' : ''}`}>
+            <div className="ai-chat-layout full-width">
                 <div className="ai-chat-main">
-                    <div className="chat-header-actions">
-                        <button className="toggle-sidebar-btn" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
-                            {isSidebarOpen ? "View Full Screen" : "Show Side Panel"}
-                        </button>
+                    <div className="chat-toggle-bar" onClick={() => setIsFullScreen(!isFullScreen)}>
+                        <Bot size={18} />
+                        <span>{isFullScreen ? "Exit Full Screen" : "Click here for Full Screen AI Chat"}</span>
+                        <div className="toggle-indicator">
+                            {isFullScreen ? "Minimize" : "Maximize"}
+                        </div>
                     </div>
                     <div className="chat-messages-container">
                         {messages.map((msg, i) => (
@@ -282,19 +285,21 @@ export default function AdminAIChat() {
                                         </div>
                                     </div>
 
-                                    {msg.role === 'agent' && ['report', 'chart', 'prediction', 'analysis', 'list'].includes(msg.type) && (
+                                    {msg.role === 'agent' && ['report', 'chart', 'prediction', 'analysis', 'list', 'restock'].includes(msg.type) && (
                                         <div className="message-actions">
-                                            <button onClick={() => downloadAsPDF(i)} title="Download Report">
-                                                <Download size={14} /> <span>PDF Download</span>
-                                            </button>
-                                            {msg.content?.toLowerCase().includes('low stock') && (
-                                                <button onClick={() => navigate('/admin/inventory')} className="action-link">
-                                                    <span>View Inventory</span> <ArrowRight size={14} />
+                                            {msg.type !== 'restock' && (
+                                                <button onClick={() => downloadAsPDF(i)} title="Download Report">
+                                                    <Download size={14} /> <span>PDF Download</span>
                                                 </button>
                                             )}
-                                            {msg.content?.toLowerCase().includes('restock') && (
-                                                <button onClick={() => navigate('/admin/vendors')} className="action-link" style={{ background: 'var(--brand)', color: 'white', border: 'none' }}>
-                                                    <span>Open Smart Panel</span> <ArrowRight size={14} />
+                                            {msg.type === 'restock' && (
+                                                <button onClick={() => navigate('/manage-vendors', { state: { tab: 'ai-restock' } })} className="action-link">
+                                                    <span>Go to Smart Restock</span> <ArrowRight size={14} />
+                                                </button>
+                                            )}
+                                            {msg.content?.toLowerCase().includes('low stock') && msg.type !== 'restock' && (
+                                                <button onClick={() => navigate('/inventory')} className="action-link">
+                                                    <span>View Inventory</span> <ArrowRight size={14} />
                                                 </button>
                                             )}
                                         </div>
@@ -322,8 +327,11 @@ export default function AdminAIChat() {
                                     key={i}
                                     className="quick-action-btn"
                                     onClick={() => {
-                                        if (action.action === 'vendors') navigate('/admin/vendors');
-                                        else handleSend(action.label);
+                                        if (action.label === 'Order Low Stock Medicines') {
+                                            navigate('/manage-vendors', { state: { tab: 'ai-restock' } });
+                                        } else {
+                                            handleSend(action.label);
+                                        }
                                     }}
                                     style={{ '--btn-color': action.color }}
                                 >
@@ -352,37 +360,6 @@ export default function AdminAIChat() {
                     </div>
                 </div>
 
-                {isSidebarOpen && (
-                    <div className="ai-chat-sidebar">
-                        <div className="sidebar-card intro-card">
-                            <div className="card-icon"><Bot size={24} /></div>
-                            <h3>About Your AI Assistant</h3>
-                            <p>I am designed to help pharmacy administrators make data-driven decisions based on system performance.</p>
-                            <ul className="capability-list">
-                                <li><ChevronRight size={14} /> Monthly/Yearly Reports</li>
-                                <li><ChevronRight size={14} /> Revenue Forecasting</li>
-                                <li><ChevronRight size={14} /> Inventory Optimization</li>
-                                <li><ChevronRight size={14} /> Customer Patterns</li>
-                            </ul>
-                        </div>
-
-                        <div className="sidebar-card tips-card">
-                            <h3>Quick Queries</h3>
-                            <div className="tip-item">
-                                <strong>Monthly Report</strong>
-                                <p>Detailed performance audit for the current month.</p>
-                            </div>
-                            <div className="tip-item">
-                                <strong>Profit Analysis</strong>
-                                <p>Analyze margins and revenue vs COGS.</p>
-                            </div>
-                            <div className="tip-item">
-                                <strong>Low Stock</strong>
-                                <p>Get a list of items running below safety levels.</p>
-                            </div>
-                        </div>
-                    </div>
-                )}
             </div>
         </div>
     );
