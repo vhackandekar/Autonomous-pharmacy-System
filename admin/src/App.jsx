@@ -2,15 +2,12 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
-import { AgentProvider } from './context/AgentContext';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
 import Orders from './pages/Orders';
-import Deliveries from './pages/Deliveries';
-import RefillAlerts from './pages/RefillAlerts';
-import AgentChat from './pages/AgentChat';
+import AdminAIChat from './pages/AdminAIChat';
 import ManageVendors from './pages/ManageVendors';
 import Settings from './pages/Settings';
 
@@ -51,9 +48,7 @@ function AppRoutes() {
       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/inventory" element={<ProtectedRoute><Inventory /></ProtectedRoute>} />
       <Route path="/orders" element={<ProtectedRoute><Orders /></ProtectedRoute>} />
-      <Route path="/deliveries" element={<ProtectedRoute><Deliveries /></ProtectedRoute>} />
-      <Route path="/refill-alerts" element={<ProtectedRoute><RefillAlerts /></ProtectedRoute>} />
-      <Route path="/agent-chat" element={<ProtectedRoute><AgentProvider><AgentChat /></AgentProvider></ProtectedRoute>} />
+      <Route path="/ai-intelligence" element={<ProtectedRoute><AdminAIChat /></ProtectedRoute>} />
       <Route path="/manage-vendors" element={<ProtectedRoute><ManageVendors /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/dashboard" />} />

@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard, Package, ShoppingCart, Truck,
-  Bell, Settings, LogOut, Pill, Users
+  LayoutDashboard, Package, ShoppingCart,
+  Bell, Settings, LogOut, Pill, Users, Bot
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -9,9 +9,7 @@ const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/inventory', icon: Package, label: 'Inventory' },
   { to: '/orders', icon: ShoppingCart, label: 'Orders', badge: '12', badgeColor: 'green' },
-  { to: '/deliveries', icon: Truck, label: 'Deliveries', badge: '8', badgeColor: '' },
-  { to: '/refill-alerts', icon: Bell, label: 'Refill Alerts', badge: '3', badgeColor: 'red' },
-  { to: '/agent-chat', icon: Pill, label: 'AI Agent' },
+  { to: '/ai-intelligence', icon: Bot, label: 'Admin AI' },
   { to: '/manage-vendors', icon: Users, label: 'Manage Vendors' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];

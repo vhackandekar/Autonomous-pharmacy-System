@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Package, Plus, Edit, Search, X } from 'lucide-react';
+import { Package, Plus, Edit, Search, X, TrendingUp, DollarSign } from 'lucide-react';
 import { getMedicines, addMedicine, updateMedicine, getInventoryDetails } from '../utils/api';
 import toast from 'react-hot-toast';
 import { usePollingData } from '../hooks/usePollingData';
 import LoadingSkeleton from '../components/LoadingSkeleton';
 
-const emptyForm = { name: '', dosage: '', unitType: 'tablets', stock: '', price: '', prescriptionRequired: false };
+const emptyForm = { name: '', dosage: '', unitType: 'tablets', stock: '', price: '', costPrice: '', prescriptionRequired: false };
 
 export default function Inventory() {
   const [medicines, setMedicines] = useState([]);
@@ -15,6 +15,8 @@ export default function Inventory() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [showPriceModal, setShowPriceModal] = useState(false);
+  const [priceForm, setPriceForm] = useState({ costPrice: 0, price: 0 });
 
   // Use polling hook for real-time inventory updates (every 10 seconds)
   const { data: inventoryData, loading, error, refetch } = usePollingData(
@@ -49,30 +51,77 @@ export default function Inventory() {
   };
 
   const openAdd = () => { setEditing(null); setForm(emptyForm); setShowModal(true); };
-  const openEdit = (med) => { setEditing(med); setForm({ ...med }); setShowModal(true); };
+  const openEdit = (med) => {
+    setEditing(med);
+    setForm({
+      ...med,
+      costPrice: med.costPrice ?? 0
+    });
+    setShowModal(true);
+  };
+
+  const openPriceUpdate = (med) => {
+    setEditing(med);
+    setPriceForm({
+      costPrice: med.costPrice || 0,
+      price: med.price || 0
+    });
+    setShowPriceModal(true);
+  };
+
+  const handlePriceSave = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const payload = {
+        costPrice: Number(priceForm.costPrice),
+        price: Number(priceForm.price)
+      };
+      const res = await updateMedicine(editing._id, payload);
+      setMedicines(prev => prev.map(m => m._id === editing._id ? res.data : m));
+      toast.success('Prices updated!');
+      setShowPriceModal(false);
+      refetch();
+    } catch (error) {
+      toast.error('Failed to update prices');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleSave = async (e) => {
     e.preventDefault();
     setSaving(true);
     try {
-      const payload = { ...form, stock: +form.stock, price: +form.price };
+      console.log('--- SAVE START ---');
+      console.log('Form State Raw:', form);
+      const payload = {
+        name: form.name,
+        dosage: form.dosage,
+        unitType: form.unitType,
+        stock: Number(form.stock),
+        price: Number(form.price),
+        costPrice: Number(form.costPrice),
+        prescriptionRequired: !!form.prescriptionRequired
+      };
+      console.log('Final Payload prepared:', payload);
+
+      console.log('Sending Update Payload:', payload);
+
       if (editing) {
-        await updateMedicine(editing._id, payload);
+        const res = await updateMedicine(editing._id, payload);
+        setMedicines(prev => prev.map(m => m._id === editing._id ? res.data : m));
         toast.success('Medicine updated!');
       } else {
-        await addMedicine(payload);
+        const res = await addMedicine(payload);
+        setMedicines(prev => [...prev, res.data]);
         toast.success('Medicine added!');
       }
       setShowModal(false);
-      refetch(); // Refetch data after save
-    } catch {
-      toast.error('Failed to save. Check if backend is running.');
-      // Optimistic update for demo
-      if (!editing) {
-        setMedicines(p => [...p, { ...form, _id: Date.now().toString(), stock: +form.stock, price: +form.price }]);
-      } else {
-        setMedicines(p => p.map(m => m._id === editing._id ? { ...m, ...form, stock: +form.stock, price: +form.price } : m));
-      }
+      refetch(); // Still refetch to sync background analytics
+    } catch (error) {
+      console.error('Save error:', error);
+      toast.error('Failed to save changes. Please try again.');
       setShowModal(false);
     } finally { setSaving(false); }
   };
@@ -142,7 +191,9 @@ export default function Inventory() {
                 <th>Dosage</th>
                 <th>Unit Type</th>
                 <th>Stock</th>
-                <th>Price</th>
+                <th>Cost Price</th>
+                <th>Selling Price</th>
+                <th>Unit Profit</th>
                 <th>Rx Required</th>
                 <th>Status</th>
                 <th>Actions</th>
@@ -174,7 +225,11 @@ export default function Inventory() {
                       </span>
                     </div>
                   </td>
+                  <td style={{ color: 'var(--text-secondary)' }}>₹{med.costPrice?.toLocaleString() || 0}</td>
                   <td style={{ fontWeight: 600 }}>₹{med.price?.toLocaleString()}</td>
+                  <td style={{ color: 'var(--accent-green)', fontWeight: 600 }}>
+                    ₹{(med.price - (med.costPrice || 0)).toLocaleString()}
+                  </td>
                   <td>
                     <span style={{
                       fontSize: 12, fontWeight: 600,
@@ -191,8 +246,16 @@ export default function Inventory() {
                   <td>
                     <button
                       className="btn btn-secondary btn-sm btn-icon"
+                      onClick={() => openPriceUpdate(med)}
+                      title="Update Price"
+                      style={{ color: 'var(--brand)' }}
+                    >
+                      <TrendingUp size={14} />
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm btn-icon"
                       onClick={() => openEdit(med)}
-                      title="Edit"
+                      title="Full Edit"
                     >
                       <Edit size={14} />
                     </button>
@@ -244,7 +307,11 @@ export default function Inventory() {
                   <input type="number" className="form-control" value={form.stock} onChange={e => setForm(p => ({ ...p, stock: e.target.value }))} required min="0" placeholder="100" />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Price (₹ paise)</label>
+                  <label className="form-label">Cost Price (₹ Buy)</label>
+                  <input type="number" className="form-control" value={form.costPrice} onChange={e => setForm(p => ({ ...p, costPrice: e.target.value }))} required min="0" placeholder="2000" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Selling Price (₹ Sell)</label>
                   <input type="number" className="form-control" value={form.price} onChange={e => setForm(p => ({ ...p, price: e.target.value }))} required min="0" placeholder="2550" />
                 </div>
               </div>
@@ -263,6 +330,80 @@ export default function Inventory() {
                 <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
                 <button type="submit" className="btn btn-primary" disabled={saving}>
                   {saving ? 'Saving...' : editing ? 'Update Medicine' : 'Add Medicine'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Price Update Modal */}
+      {showPriceModal && (
+        <div className="modal-overlay" onClick={() => setShowPriceModal(false)}>
+          <div className="modal" style={{ maxWidth: '400px' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3><TrendingUp size={18} /> Update Pricing: {editing?.name}</h3>
+              <button className="btn btn-secondary btn-sm btn-icon" onClick={() => setShowPriceModal(false)}>
+                <X size={16} />
+              </button>
+            </div>
+            <form onSubmit={handlePriceSave}>
+              <div className="form-group">
+                <label className="form-label">Purchase / Cost Price (₹)</label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="number"
+                    className="form-control"
+                    value={priceForm.costPrice}
+                    onChange={e => setPriceForm(p => ({ ...p, costPrice: e.target.value }))}
+                    required
+                    min="0"
+                    placeholder="Enter buying price"
+                    style={{ paddingLeft: '30px' }}
+                  />
+                  <DollarSign size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                </div>
+                <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                  The price at which you purchased this item from the vendor.
+                </p>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Selling Price (₹)</label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="number"
+                    className="form-control"
+                    value={priceForm.price}
+                    onChange={e => setPriceForm(p => ({ ...p, price: e.target.value }))}
+                    required
+                    min="0"
+                    placeholder="Enter selling price"
+                    style={{ paddingLeft: '30px' }}
+                  />
+                  <TrendingUp size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                </div>
+              </div>
+
+              <div className="profit-preview" style={{ background: 'var(--bg-secondary)', padding: '12px', borderRadius: '8px', marginBottom: '20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '4px' }}>
+                  <span>Gross Margin:</span>
+                  <span style={{ fontWeight: 700, color: 'var(--accent-green)' }}>
+                    ₹{(priceForm.price - priceForm.costPrice).toLocaleString()}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
+                  <span>Margin Percentage:</span>
+                  <span style={{ fontWeight: 700, color: 'var(--accent-blue)' }}>
+                    {priceForm.price > 0 ? ((priceForm.price - priceForm.costPrice) / priceForm.price * 100).toFixed(1) : 0}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowPriceModal(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={saving}>
+                  {saving ? 'Updating...' : 'Save Prices'}
                 </button>
               </div>
             </form>

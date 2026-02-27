@@ -88,6 +88,10 @@ export const getVendors = () => api.get('/vendor');
 export const addVendor = (data) => api.post('/vendor/add', data);
 export const updateVendor = (id, data) => api.put(`/vendor/update/${id}`, data);
 export const deleteVendor = (id) => api.delete(`/vendor/${id}`);
+export const getPurchaseOrders = () => api.get('/vendor/purchase');
+export const createPurchaseOrder = (data) => api.post('/vendor/purchase/create', data);
+export const cancelPurchaseOrder = (id) => api.put(`/vendor/purchase/cancel/${id}`);
+export const getAIRestockDraft = () => api.get('/vendor/ai-restock-draft');
 
 // REFILL REQUESTS
 export const getRefillRequests = () => api.get('/refill-request');
