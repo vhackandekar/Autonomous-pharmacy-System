@@ -2,13 +2,22 @@ const Medicine = require('../schema/Medicine');
 const Prescription = require('../schema/Prescription');
 
 class SafetyAgent {
-    async validateOrder(userId, items) {
+    async validateOrder(userId, items, parentTrace = null, sessionId = null) {
+        const langfuse = require('../utils/langfuseClient');
+        const span = parentTrace ? parentTrace.span({
+            name: "Safety-Validation-Agent",
+            input: { items, userId },
+            metadata: { sessionId }
+        }) : null;
+
         const results = [];
         let isApproved = true;
         const reasons = [];
 
         for (const item of items) {
-            const medicine = await Medicine.findOne({ name: new RegExp(item.medicine_name, 'i') });
+            const escapedName = item.medicine_name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            // Use word boundaries to avoid partial matches (e.g., "Cold" matching "Cold & Cough")
+            const medicine = await Medicine.findOne({ name: { $regex: new RegExp(`\\b${escapedName}\\b`, 'i') } });
 
             if (!medicine) {
                 isApproved = false;
@@ -30,13 +39,18 @@ class SafetyAgent {
                 const validPrescription = await Prescription.findOne({
                     userId,
                     medicineId: medicine._id,
-                    validTill: { $gt: new Date() }
+                    status: 'VERIFIED',
+                    validTill: { $gt: new Date() },
+                    $or: [
+                        { isReusable: true },
+                        { isUsed: false }
+                    ]
                 });
 
                 if (!validPrescription) {
                     isApproved = false;
-                    reasons.push(`Prescription required for ${medicine.name}. No valid record found.`);
-                    results.push({ medicine_name: medicine.name, status: 'REJECTED', reason: 'PRESCRIPTION_MISSING' });
+                    reasons.push(`A valid, un-used prescription is required for ${medicine.name}.`);
+                    results.push({ medicine_name: medicine.name, status: 'REJECTED', reason: 'PRESCRIPTION_MISSING_OR_USED' });
                     continue;
                 }
             }
@@ -44,11 +58,19 @@ class SafetyAgent {
             results.push({ medicine_name: medicine.name, status: 'APPROVED', medicineId: medicine._id });
         }
 
-        return {
+        const finalResult = {
             isApproved,
             reasons,
             details: results
         };
+
+        if (span) {
+            span.end({
+                output: finalResult
+            });
+        }
+
+        return finalResult;
     }
 }
 

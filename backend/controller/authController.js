@@ -10,10 +10,8 @@ exports.register = async (req, res) => {
             return res.status(400).json({ error: "Name, email and password are required." });
         }
 
-        const roleUpper = role ? String(role).toUpperCase() : 'USER';
-        if (!['USER', 'ADMIN'].includes(roleUpper)) {
-            return res.status(400).json({ error: "Role must be USER or ADMIN." });
-        }
+        // Security: Default to USER and do NOT allow setting ADMIN role via public registration
+        const roleUpper = 'USER';
 
         const emailNorm = email.trim().toLowerCase();
         const existing = await User.findOne({ email: new RegExp(`^${emailNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') });
@@ -34,6 +32,7 @@ exports.register = async (req, res) => {
         await user.save();
         res.status(201).json({ message: "User registered successfully", userId: user._id });
     } catch (error) {
+        console.error("Registration Error:", error);
         if (error.code === 11000) {
             return res.status(400).json({ error: "This email is already registered. Please login or use a different email." });
         }
@@ -47,6 +46,11 @@ exports.register = async (req, res) => {
 exports.login = async (req, res) => {
     try {
         const { email, password } = req.body;
+
+        if (!email || !password) {
+            return res.status(400).json({ error: "Email and password are required" });
+        }
+
         const user = await User.findOne({ email });
 
         if (!user) return res.status(401).json({ error: "Invalid credentials" });
@@ -73,7 +77,7 @@ exports.login = async (req, res) => {
 
 exports.getProfile = async (req, res) => {
     try {
-        const userId = req.user ? req.user.id : req.query.userId;
+        const userId = req.user.id;
         const user = await User.findById(userId).select('-password');
         if (!user) return res.status(404).json({ error: "User not found" });
         res.json(user);
@@ -84,7 +88,7 @@ exports.getProfile = async (req, res) => {
 
 exports.updateProfile = async (req, res) => {
     try {
-        const userId = req.user ? req.user.id : req.body.userId;
+        const userId = req.user.id;
         const updates = req.body;
 
         // Remove sensitive fields if present

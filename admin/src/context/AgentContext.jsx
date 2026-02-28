@@ -107,7 +107,7 @@ export function AgentProvider({ children }) {
         trend: 'stable',
       });
 
-      if (med.stock < 20 || riskScore >= 50) {
+      if (med.stock < (med.lowStockThreshold || 20) || riskScore >= 50) {
         refillRisks.push({
           medicineId: med._id,
           name: med.name,

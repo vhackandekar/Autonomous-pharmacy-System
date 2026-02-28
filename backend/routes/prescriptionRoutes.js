@@ -1,10 +1,25 @@
 const express = require('express');
 const router = express.Router();
 const prescriptionController = require('../controller/prescriptionController');
+const { verifyToken, isAdmin } = require('../middleware/auth');
 const multer = require('multer');
 const path = require('path');
 
-// Multer Config
+// File type whitelist for prescriptions
+const ALLOWED_FILE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.pdf'];
+
+const fileFilter = (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const mimetype = file.mimetype.toLowerCase();
+
+    if (!ALLOWED_EXTENSIONS.includes(ext) || !ALLOWED_FILE_TYPES.includes(mimetype)) {
+        return cb(new Error(`Invalid file type. Allowed: ${ALLOWED_EXTENSIONS.join(', ')}`), false);
+    }
+    cb(null, true);
+};
+
+// Multer Config with file validation
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         cb(null, 'uploads/');
@@ -14,9 +29,42 @@ const storage = multer.diskStorage({
     }
 });
 
-const upload = multer({ storage: storage });
+const upload = multer({
+    storage: storage,
+    fileFilter: fileFilter,
+    limits: { fileSize: 25 * 1024 * 1024 } // Increased to 25MB limit
+});
 
-router.get('/validate', prescriptionController.validatePrescription);
-router.post('/upload', upload.single('prescription'), prescriptionController.uploadPrescription);
+// Enhanced error handler for multer file validation
+const uploadHandler = (req, res, next) => {
+    upload.single('prescription')(req, res, (err) => {
+        if (err) {
+            console.error('Multer upload error:', err);
+            // Handle different error types
+            if (err.code === 'LIMIT_FILE_SIZE') {
+                return res.status(400).json({ error: 'File size exceeds 25MB limit' });
+            }
+            if (err.code === 'LIMIT_PART_COUNT') {
+                return res.status(400).json({ error: 'Too many parts in request' });
+            }
+            if (err.code === 'LIMIT_FILE_COUNT') {
+                return res.status(400).json({ error: 'Too many files' });
+            }
+            return res.status(400).json({ error: err.message || 'File upload failed' });
+        }
+        if (!req.file && req.method === 'POST') {
+            // Let the controller handle missing file
+            return next();
+        }
+        next();
+    });
+};
+
+router.get('/validate', verifyToken, prescriptionController.validatePrescription);
+router.get('/my', verifyToken, prescriptionController.getUserPrescriptions);
+router.post('/upload', verifyToken, uploadHandler, prescriptionController.uploadPrescription);
+router.delete('/:id', verifyToken, prescriptionController.deletePrescription);
+router.get('/all', verifyToken, isAdmin, prescriptionController.getAllPrescriptions);
+router.put('/review/:id', verifyToken, isAdmin, prescriptionController.adminReviewPrescription);
 
 module.exports = router;

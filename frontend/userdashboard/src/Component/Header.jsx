@@ -1,4 +1,4 @@
-import { Search, Bell, User, Settings, LogOut, ChevronDown, PanelLeftClose, PanelLeft, ShoppingCart } from 'lucide-react';
+import { Bell, User, Settings, LogOut, ChevronDown, PanelLeftClose, PanelLeft, ShoppingCart } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { useSidebar } from '../context/SidebarContext';
@@ -40,16 +40,6 @@ const Header = () => {
               {isCollapsed ? <PanelLeft size={22} /> : <PanelLeftClose size={22} />}
             </div>
           </button>
-
-          {/* Search Bar */}
-          <div className="relative group hidden md:block">
-            <Search className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors ${theme === 'dark' ? 'text-brand-text-secondary group-focus-within:text-brand-primary' : 'text-slate-400 group-focus-within:text-brand-primary'}`} size={18} />
-            <input
-              type="text"
-              placeholder="Search prescriptions, orders..."
-              className={`pl-12 pr-6 py-2.5 w-[320px] rounded-[1rem] text-sm font-medium border transition-all placeholder:opacity-40 focus:outline-none focus:ring-4 ${theme === 'dark' ? 'bg-white/5 border-white/10 focus:ring-brand-primary/20 focus:border-brand-primary/50' : 'bg-slate-50 border-slate-200 focus:ring-blue-500/10 focus:border-blue-500/50'}`}
-            />
-          </div>
         </div>
 
         <div className="flex items-center space-x-2">

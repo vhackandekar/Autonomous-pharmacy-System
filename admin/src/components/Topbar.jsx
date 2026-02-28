@@ -2,8 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import { Search, Bell, Moon, Sun, ShoppingCart, AlertTriangle, User, Settings, LogOut, ChevronDown } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { getNotifications, getAllOrders, getMedicines } from '../utils/api';
+import { getAdminNotifications, getAllOrders, getMedicines, markNotificationRead, markAllNotificationsRead } from '../utils/api';
 import { Link, useNavigate } from 'react-router-dom';
+import { io } from 'socket.io-client';
 
 export default function Topbar() {
   const { user, logout } = useAuth();
@@ -19,9 +20,22 @@ export default function Topbar() {
 
   useEffect(() => {
     fetchNotifications();
-    // Refresh notifications every 30 seconds
+
+    // Socket: Listen for real-time notifications
+    const socket = io(import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000');
+    socket.emit('join', { role: 'ADMIN' });
+
+    socket.on('notification', fetchNotifications);
+    socket.on('stock_alert', fetchNotifications);
+    socket.on('refill_alert_admin', fetchNotifications);
+    socket.on('order_created', fetchNotifications);
+
+    // Refresh notifications every 30 seconds as fallback
     const interval = setInterval(fetchNotifications, 30000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      socket.disconnect();
+    };
   }, []);
 
   // Close dropdowns when clicking outside
@@ -53,85 +67,77 @@ export default function Topbar() {
   const fetchNotifications = async () => {
     try {
       setLoading(true);
-      // Try to fetch real notifications
       try {
         const [notifsRes, ordersRes, medicinesRes] = await Promise.all([
-          user?.id ? getNotifications(user.id).catch(() => ({ data: [] })) : Promise.resolve({ data: [] }),
+          getAdminNotifications().catch(() => ({ data: [] })),
           getAllOrders().catch(() => ({ data: [] })),
           getMedicines().catch(() => ({ data: [] }))
         ]);
 
         const allNotifs = [];
-        
-        // Add pending orders
-        const pendingOrders = (ordersRes.data || []).filter(o => 
-          o.status === 'PENDING' || o.status === 'CONFIRMED'
-        ).slice(0, 5);
-        pendingOrders.forEach(order => {
+
+        // 1. Add Real DB Notifications
+        (notifsRes.data || []).forEach(notif => {
           allNotifs.push({
-            id: `order-${order._id}`,
-            type: 'order',
-            title: 'New Order',
-            message: `Order #${order._id?.slice(-6).toUpperCase()} - ₹${order.totalAmount?.toLocaleString()}`,
-            time: new Date(order.orderDate),
-            icon: ShoppingCart,
-            link: '/orders',
-            unread: true
+            id: notif._id,
+            type: notif.type,
+            title: notif.type === 'refill' ? 'Refill Alert' : (notif.type === 'order' ? 'Order Update' : (notif.type === 'stock_alert' ? 'Low Stock Alert' : 'System Alert')),
+            message: notif.message,
+            time: new Date(notif.sentAt || notif.createdAt),
+            icon: notif.type === 'refill' ? User : (notif.type === 'order' ? ShoppingCart : AlertTriangle),
+            link: notif.type === 'refill' ? '/refill-alerts' : '/orders',
+            unread: !notif.isRead,
+            isReal: true
           });
         });
 
-        // Add low stock medicines
-        const lowStock = (medicinesRes.data || []).filter(m => m.stock < 20).slice(0, 5);
+        // 2. Add synthetic pending orders (if not already covered)
+        const pendingOrders = (ordersRes.data || []).filter(o =>
+          o.status === 'PENDING' || o.status === 'CONFIRMED'
+        ).slice(0, 5);
+
+        pendingOrders.forEach(order => {
+          // Check if we already have a real notif for this order ID in the message
+          const exists = allNotifs.some(n => n.message.includes(order._id?.slice(-6).toUpperCase()));
+          if (!exists) {
+            allNotifs.push({
+              id: `order-${order._id}`,
+              type: 'order',
+              title: 'Pending Order',
+              message: `Order #${order._id?.slice(-6).toUpperCase()} - ₹${order.totalAmount?.toLocaleString()}`,
+              time: new Date(order.orderDate),
+              icon: ShoppingCart,
+              link: '/orders',
+              unread: true,
+              isReal: false
+            });
+          }
+        });
+
+        // 3. Add low stock medicines
+        const lowStock = (medicinesRes.data || []).filter(m => m.stock < (m.lowStockThreshold || 20)).slice(0, 5);
         lowStock.forEach(med => {
-          allNotifs.push({
-            id: `stock-${med._id}`,
-            type: 'stock',
-            title: 'Low Stock Alert',
-            message: `${med.name} - Only ${med.stock} units left`,
-            time: new Date(),
-            icon: AlertTriangle,
-            link: '/inventory',
-            unread: true
-          });
+          const exists = allNotifs.some(n => n.message.includes(med.name));
+          if (!exists) {
+            allNotifs.push({
+              id: `stock-${med._id}`,
+              type: 'stock',
+              title: 'Low Stock Alert',
+              message: `${med.name} - Only ${med.stock} units left`,
+              time: new Date(),
+              icon: AlertTriangle,
+              link: '/inventory',
+              unread: true,
+              isReal: false
+            });
+          }
         });
 
         // Sort by time (newest first)
         allNotifs.sort((a, b) => b.time - a.time);
-        setNotifications(allNotifs.slice(0, 10));
-      } catch {
-        // Fallback to mock data
-        setNotifications([
-          {
-            id: '1',
-            type: 'order',
-            title: 'New Order',
-            message: 'Order #ABC123 - ₹2,500',
-            time: new Date(),
-            icon: ShoppingCart,
-            link: '/orders',
-            unread: true
-          },
-          {
-            id: '2',
-            type: 'stock',
-            title: 'Low Stock Alert',
-            message: 'Amoxicillin 500mg - Only 15 units left',
-            time: new Date(Date.now() - 3600000),
-            icon: AlertTriangle,
-            link: '/inventory',
-            unread: true
-          },
-          {
-            id: '3',
-            type: 'order',
-            title: 'New Order',
-            message: 'Order #XYZ789 - ₹1,800',
-            time: new Date(Date.now() - 7200000),
-            icon: ShoppingCart,
-            link: '/orders',
-            unread: false
-          }
-        ]);
+        setNotifications(allNotifs.slice(0, 15));
+      } catch (err) {
+        console.error('Error fetching real notifications:', err);
       }
     } catch (error) {
       console.error('Failed to fetch notifications:', error);
@@ -142,14 +148,26 @@ export default function Topbar() {
 
   const unreadCount = notifications.filter(n => n.unread).length;
 
-  const markAsRead = (id) => {
-    setNotifications(prev => 
-      prev.map(n => n.id === id ? { ...n, unread: false } : n)
-    );
+  const markAsRead = async (notif) => {
+    // Optimistic update
+    setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, unread: false } : n));
+
+    if (notif.isReal) {
+      try {
+        await markNotificationRead(notif.id);
+      } catch (e) { console.error('Failed to mark read on server', e); }
+    }
   };
 
-  const markAllAsRead = () => {
+  const markAllAsRead = async () => {
+    // Optimistic update
     setNotifications(prev => prev.map(n => ({ ...n, unread: false })));
+
+    try {
+      await markAllNotificationsRead({ role: 'ADMIN' });
+    } catch (e) {
+      console.error('Failed to mark all read on server', e);
+    }
   };
 
   const formatTime = (date) => {
@@ -173,16 +191,16 @@ export default function Topbar() {
       </div>
 
       <div className="topbar-actions">
-        <button 
-          className="icon-btn" 
-          onClick={toggleTheme} 
+        <button
+          className="icon-btn"
+          onClick={toggleTheme}
           title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
         >
           {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
         </button>
         <div className="notification-wrapper" ref={notificationsRef}>
-          <button 
-            className="icon-btn" 
+          <button
+            className="icon-btn"
             onClick={() => setShowNotifications(!showNotifications)}
             title="Notifications"
           >
@@ -192,13 +210,13 @@ export default function Topbar() {
               <span className="notif-count">{unreadCount > 9 ? '9+' : unreadCount}</span>
             )}
           </button>
-          
+
           {showNotifications && (
             <div className="notification-dropdown">
               <div className="notification-header">
                 <h4>Notifications</h4>
                 {unreadCount > 0 && (
-                  <button 
+                  <button
                     className="mark-all-read-btn"
                     onClick={markAllAsRead}
                   >
@@ -206,7 +224,7 @@ export default function Topbar() {
                   </button>
                 )}
               </div>
-              
+
               <div className="notification-list">
                 {loading ? (
                   <div className="notification-empty">Loading notifications...</div>
@@ -224,7 +242,7 @@ export default function Topbar() {
                         to={notif.link}
                         className={`notification-item ${notif.unread ? 'unread' : ''}`}
                         onClick={() => {
-                          markAsRead(notif.id);
+                          markAsRead(notif);
                           setShowNotifications(false);
                         }}
                       >
@@ -242,7 +260,7 @@ export default function Topbar() {
                   })
                 )}
               </div>
-              
+
               {notifications.length > 0 && (
                 <div className="notification-footer">
                   <Link to="/refill-alerts" onClick={() => setShowNotifications(false)}>
@@ -254,8 +272,8 @@ export default function Topbar() {
           )}
         </div>
         <div className="profile-wrapper" ref={profileRef}>
-          <div 
-            className="admin-profile" 
+          <div
+            className="admin-profile"
             onClick={() => setShowProfile(!showProfile)}
             style={{ cursor: 'pointer' }}
           >
@@ -266,7 +284,7 @@ export default function Topbar() {
             </div>
             <ChevronDown size={16} style={{ marginLeft: 8, opacity: 0.6, transition: 'transform 0.2s', transform: showProfile ? 'rotate(180deg)' : 'rotate(0deg)' }} />
           </div>
-          
+
           {showProfile && (
             <div className="profile-dropdown">
               <div className="profile-header">
@@ -279,18 +297,18 @@ export default function Topbar() {
                   <div className="profile-role">{user?.role || 'ADMIN'}</div>
                 </div>
               </div>
-              
+
               <div className="profile-menu">
-                <Link 
-                  to="/settings" 
+                <Link
+                  to="/settings"
                   className="profile-menu-item"
                   onClick={() => setShowProfile(false)}
                 >
                   <User size={16} />
                   <span>View Profile</span>
                 </Link>
-                <Link 
-                  to="/settings" 
+                <Link
+                  to="/settings"
                   className="profile-menu-item"
                   onClick={() => setShowProfile(false)}
                 >
@@ -298,7 +316,7 @@ export default function Topbar() {
                   <span>Settings</span>
                 </Link>
                 <div className="profile-menu-divider" />
-                <button 
+                <button
                   className="profile-menu-item logout-item"
                   onClick={handleLogout}
                 >

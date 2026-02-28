@@ -43,7 +43,14 @@ const reportSectionStyle = {
 };
 
 const orderStatusClass = (s) => {
-  const m = { PENDING: 'pending', CONFIRMED: 'confirmed', SHIPPED: 'shipped', DELIVERED: 'delivered', FULFILLED: 'delivered', REJECTED: 'rejected' };
+  const m = {
+    PENDING: 'pending',
+    PROCESSING: 'processing',
+    SHIPPED: 'shipped',
+    DELIVERED: 'delivered',
+    CANCELLED: 'rejected',
+    REJECTED: 'rejected'
+  };
   return m[s] || 'pending';
 };
 
@@ -295,7 +302,7 @@ export default function AgentChat() {
 
       await createRefillRequest(requestData);
       const requestId = 'req_' + Date.now();
-      await sendRefillToVendor(requestId, vendorId || vendors?.[0]?._id).catch(() => {});
+      await sendRefillToVendor(requestId, vendorId || vendors?.[0]?._id).catch(() => { });
 
       const vendor = vendors?.find(v => v._id === vendorId);
       toast.success(`Order executed! Sent to ${vendor?.name || 'vendor'}`);
@@ -345,7 +352,7 @@ export default function AgentChat() {
       };
 
       await createRefillRequest(requestData);
-      await sendRefillToVendor('req_' + Date.now(), vendorId).catch(() => {});
+      await sendRefillToVendor('req_' + Date.now(), vendorId).catch(() => { });
 
       const vendor = vendors?.find(v => v._id === vendorId);
       toast.success(`Refill sent to ${vendor?.name || 'vendor'}!`);
@@ -615,7 +622,7 @@ export default function AgentChat() {
                 <div className="chat-message agent">
                   <div className="chat-avatar agent"><Bot size={16} /></div>
                   <div className="chat-bubble chat-bubble-card" style={{ display: 'flex', gap: 4, padding: '14px 16px' }}>
-                    {[0,1,2].map(i => (
+                    {[0, 1, 2].map(i => (
                       <div key={i} style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--text-muted)', animation: 'bounce 1s infinite', animationDelay: `${i * 0.2}s` }} />
                     ))}
                   </div>

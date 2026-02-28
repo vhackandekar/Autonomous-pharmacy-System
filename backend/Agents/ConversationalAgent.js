@@ -9,8 +9,8 @@ class ConversationalAgent {
         // Initialize Gemini
         if (process.env.GEMINI_API_KEY) {
             this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-            // Using a more stable model identifier
-            this.geminiModel = this.genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+            // Use latest stable model without apiVersion parameter
+            this.geminiModel = this.genAI.getGenerativeModel({ model: "gemini-2.0-flash" }, { apiVersion: "v1" });
         }
 
         // Initialize Groq
@@ -19,130 +19,129 @@ class ConversationalAgent {
         }
     }
 
-    async processMessage(userMessage, chatHistory, orderHistory, availableMedicines, userPrescriptions, userCart, userName) {
+    _stripAndParse(text) {
+        if (!text || typeof text !== 'string') return null;
+        try {
+            const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
+            return JSON.parse(cleaned);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    _isValidResponse(obj) {
+        if (!obj || typeof obj !== 'object') return false;
+        if (!obj.intent || typeof obj.answer !== 'string') return false;
+        if (typeof obj.confidence !== 'number') return false;
+        if (!Array.isArray(obj.items)) obj.items = [];
+        return true;
+    }
+
+    async processMessage(userMessage, chatHistory, orderHistory, availableMedicines, userPrescriptions, userCart, userName, parentTrace = null, sessionId = null) {
+        const langfuse = require('../utils/langfuseClient');
+        const span = parentTrace ? parentTrace.span({
+            name: "Conversational-Agent-Brain",
+            input: { userMessage, userName },
+            metadata: { sessionId }
+        }) : null;
+
         let lastError = "";
         const prompt = `
-      SYSTEM ROLE:
-You are an **Expert AI Pharmacist** named Dr. Saahil (or simply "The Pharmacist").
-You are not a robotic assistant; you are a licensed, ethical, and deeply empathetic professional.
-Your goal is to provide clinical precision with a warm, human touch.
+# ROLE
+You are Dr. Saahil, a Licensed Expert AI Pharmacist. Use clinical precision and deep empathy.
 
-────────────────────────────────
-PERSONALITY & TONE:
-- **Be Human**: Walk into the conversation like a real person. Use natural transitions.
-- **Empathy First**: If a user is in pain or anxious, acknowledge it. (e.g., "I'm sorry you're feeling this way.")
-- **Avoid "Bot-speak"**: Never say "As an AI model" or "I am programmed to".
-- **Conversational Continuity**: Use the provided History to remember what was just discussed. If they ask a follow-up, don't repeat your introductory greeting.
-- **Language**: Respond EXCLUSIVELY in the language used by the user in their current message. If they speak English, reply ONLY in English. If they speak Hindi, reply ONLY in Hindi. Do NOT mix languages unless the user does.
+# KNOWLEDGE BASE (TRUSTED DATA ONLY)
+- User: ${userName}
+- Available Inventory: ${JSON.stringify(availableMedicines.map(m => ({ name: m.name, price: m.price, stock: m.stock })))}
+- Current Cart: ${JSON.stringify(userCart)}
+- Past Orders: ${JSON.stringify(orderHistory)}
+- User Prescriptions: ${JSON.stringify(userPrescriptions.map(p => ({ medicine: p.medicineId.name, status: p.status, expiry: p.validTill })))}
+- History: ${JSON.stringify(chatHistory.slice(-6))}
+- User Message: "${userMessage}"
 
-────────────────────────────────
-INPUT DATA (TRUSTED SOURCES):
-1. **User Name**: ${userName}
-2. **User Message**: "${userMessage}"
-3. **Conversation History**:
-${JSON.stringify(chatHistory)}
+# REASONING PROTOCOL (THINK BEFORE ANSWERING)
+1. **Analyze Intent**: Is the user asking a new question, confirming an order, or asking about history?
+2. **Consult Data**: Is the medicine mentioned in the "Available Inventory"? If NOT, do not hallucinate a price.
+3. **Check Context**: If the user says "Yes", did I just provide a price summary in the history?
+4. **Clinical Safety (PRESCRIPTIONS)**: 
+   - Before suggesting "Shall I add this?", check if the item requires a prescription in Available Inventory.
+   - If user has NO prescription: "A prescription is required for this. You can upload it here directly using the paperclip icon 📎 or via the Prescription Portal in the sidebar."
+   - If prescription status is 'AI_APPROVED': "Great news! I've pre-analyzed your prescription and it looks correct. Our pharmacist is doing a final validation right now, and you'll be able to order soon!"
+   - If prescription status is 'PENDING': "I'm currently reviewing your prescription (Verification in progress). I'll let you know as soon as our human pharmacist confirms it!"
+   - If prescription status is 'REJECTED': "I'm sorry, the prescription you uploaded was rejected by our panel. Reason: [See Prescription Portal]. Please upload a valid, clear copy."
+   - If prescription status is 'EXPIRED': "Your prescription for this has expired. You'll need to upload a fresh one via the 📎 icon."
+   - DO NOT return 'ADD_TO_CART' or 'ORDER_PAYMENT' intent for medicines requiring a prescription if the user doesn't have a 'VERIFIED' one. Return 'FALLBACK' instead.
 
-4. **Medical Context**:
-   - Inventory: ${JSON.stringify(availableMedicines)}
-   - User's Past Orders: ${JSON.stringify(orderHistory)}
-   - Current Cart: ${JSON.stringify(userCart)}
-   - Prescriptions on File: ${JSON.stringify(userPrescriptions)}
-────────────────────────────────
+# OPERATIONAL RULES
+- Respond ONLY in the language the user is speaking (English/Hindi/etc).
+- If a medicine is not in inventory, say: "I'm sorry, we don't carry [Name] at the moment."
+- **2-Step Workflow**:
+    - First, provide the price and ask "Shall I place this order?" (ORDER_MEDICINE)
+    - Second, only place it if they say "Yes/Confirm" (ORDER_PAYMENT)
+- If user input is not understandable and confusing, ask follow-up questions to clear the doubt and try to understand the user requirement and then respond.
 
-CORE OPERATIONAL RULES:
-1. **Clinical Safety**: NEVER suggest a medicine not in Inventory. NEVER ignore a prescription requirement.
-2. **Intent Precision**: Classify the user action into ONE of these: 
-   - ORDER_MEDICINE (Step 1 of ordering)
-   - ORDER_PAYMENT (Step 2/Confirmation of ordering)
-   - ADD_TO_CART, REMOVE_FROM_CART, VIEW_CART
-   - SYMPTOM_QUERY, HISTORY_QUERY, GENERAL_QUERY, CANCEL_ORDER, REFILL
-   - FALLBACK (If unsure)
-3. **Order Placement Workflow (STRICT 2-STEP PROCESS)**:
-   - **Step 1 (Inquiry/Review)**: When a user mentions a medicine or asks to buy/order something for the FIRST time, use the **ORDER_MEDICINE** intent. 
-     - **Action**: Summarize the item, quantity, and total price.
-     - **Question**: Ask: "Would you like me to go ahead and place this order for you?"
-   - **Step 2 (Final Confirmation)**: When the user says "Yes", "Confirm", "Proceed", or "Place it" in response to your summary from Step 1, you MUST use the **ORDER_PAYMENT** intent.
-     - **Action**: Conclude the interaction with a warm confirmation that the order has been placed.
-   - **Critical Rule**: If you have already provided a price summary in the history, and the user's latest response is an affirmative (Yes/Confirm), you MUST switch to **ORDER_PAYMENT**. Do NOT use ORDER_MEDICINE again for an affirmative response.
-4. **General Queries**: For health advice, provide general guidance + a disclaimer for severe cases.
-
-📦 OUTPUT FORMAT (STRICT JSON ONLY):
+# OUTPUT FORMAT (STRICT JSON)
 {
-  "intent": "Intent_Value",
-  "answer": "Your natural, empathetic, and human-like response in the CORRECT language.",
+  "thought_process": "Briefly state your internal reasoning here",
+  "intent": "ORDER_MEDICINE | ORDER_PAYMENT | ADD_TO_CART | REMOVE_FROM_CART | SYMPTOM_QUERY | FALLBACK",
+  "answer": "Professional, human-like response.",
   "total_price": number,
-  "items": [{ "medicine_name": "string", "quantity": number, "dosage": "string" }],
-  "confidence": number
+  "items": [{ "medicine_name": "string", "quantity": number }],
+  "confidence": 0.95
 }
-    `;
 
-        // --- MODEL CHAIN: GROQ (Primary) -> GEMINI (Strong Fallback) -> GROQ 8B (Last Resort) ---
+# EXAMPLE (REMOVE FROM CART)
+User: "Actually, remove the Dolo from my cart."
+AI: { "intent": "REMOVE_FROM_CART", "thought_process": "User wants to remove a specific item from their cart.", "answer": "No problem! I've removed Dolo 650 from your cart. Is there anything else you'd like to change?", "items": [{ "medicine_name": "Dolo" }] }
+`;
+
+        // --- MODEL CHAIN ---
+        let finalResponse = null;
 
         // 1. Primary: Groq Llama 3.3 70b
         if (this.groq) {
             try {
-                console.log("Attempting Primary Model (Groq 70b)...");
+                const generation = span ? span.generation({ name: "Groq-70b-Primary", model: "llama-3.3-70b-versatile", input: prompt }) : null;
                 const chatCompletion = await this.groq.chat.completions.create({
                     messages: [{ role: "user", content: prompt }],
                     model: "llama-3.3-70b-versatile",
                     response_format: { type: "json_object" }
                 });
-                return JSON.parse(chatCompletion.choices[0].message.content);
-            } catch (groqError) {
-                lastError = `Groq 70b: ${groqError.message}`;
-                console.warn(`Groq 70b Error: ${groqError.status} - ${groqError.message}`);
-            }
+
+                let parsed = this._stripAndParse(chatCompletion.choices[0].message.content);
+                if (this._isValidResponse(parsed)) {
+                    if (generation) generation.end({ output: parsed });
+                    finalResponse = parsed;
+                }
+            } catch (e) { console.warn("Groq Primary Failed", e.message); }
         }
 
-        // 2. Strong Fallback: Gemini (Multi-model support)
-        if (this.geminiModel) {
+        // 2. Fallback: Gemini
+        if (!finalResponse && this.geminiModel) {
             try {
-                console.log("Attempting Fallback Model (Gemini)...");
+                const generation = span ? span.generation({ name: "Gemini-Fallback", model: "gemini-2.0-flash", input: prompt }) : null;
                 const result = await this.geminiModel.generateContent(prompt);
                 const response = await result.response;
-                let text = response.text().replace(/```json/g, '').replace(/```/g, '').trim();
-                return JSON.parse(text);
-            } catch (geminiError) {
-                console.warn(`Gemini primary failed. Attempting secondary (gemini-pro-latest)...`);
-                try {
-                    const secondaryModel = this.genAI.getGenerativeModel({ model: "gemini-pro" });
-                    const result = await secondaryModel.generateContent(prompt);
-                    const response = await result.response;
-                    let text = response.text().replace(/```json/g, '').replace(/```/g, '').trim();
-                    return JSON.parse(text);
-                } catch (e) {
-                    lastError = `Gemini: ${e.message}`;
-                    console.error(`All Gemini models failed: ${e.message}`);
+                let parsed = this._stripAndParse(response.text());
+                if (this._isValidResponse(parsed)) {
+                    if (generation) generation.end({ output: parsed });
+                    finalResponse = parsed;
                 }
-            }
+            } catch (e) { console.warn("Gemini Fallback Failed", e.message); }
         }
 
-        // 3. Last Resort: Groq Llama 3.1 8b
-        if (this.groq) {
-            try {
-                console.log("Attempting Last Resort Model (Groq 8b)...");
-                const fallbackComp = await this.groq.chat.completions.create({
-                    messages: [{ role: "user", content: prompt }],
-                    model: "llama-3.1-8b-instant",
-                    response_format: { type: "json_object" }
-                });
-                return JSON.parse(fallbackComp.choices[0].message.content);
-            } catch (e) {
-                console.error(`All Models Failed. Last error from Groq 8b: ${e.message}`);
-            }
+        // Default Fallback
+        if (!finalResponse) {
+            finalResponse = {
+                intent: "FALLBACK",
+                answer: "I'm having a technical moment. Could you try again?",
+                items: [],
+                confidence: 0
+            };
         }
 
-        // --- STEP 3: LAST RESORT FALLBACK ---
-        let errorHint = "";
-        if (!this.groq && !this.geminiModel) errorHint = " (No API keys configured)";
-        else if (lastError) errorHint = ` (Diagnostic: ${lastError})`;
-
-        return {
-            intent: "FALLBACK",
-            answer: `I'm so sorry, but I'm having a technical moment. Could you please try again?${errorHint}`,
-            items: [],
-            confidence: 0
-        };
+        if (span) span.end({ output: finalResponse });
+        return finalResponse;
     }
 
     async translateMessage(message, targetLanguage) {

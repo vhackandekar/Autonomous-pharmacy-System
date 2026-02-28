@@ -14,19 +14,27 @@ exports.getStats = async (req, res) => {
         });
 
         // Counts by shipment status for dashboard quick-stats
-        const inWarehouseCount = await Order.countDocuments({ status: 'IN_WAREHOUSE' });
+        const pendingCount = await Order.countDocuments({ status: 'PENDING' });
+        const processingCount = await Order.countDocuments({ status: 'PROCESSING' });
         const shippedCount = await Order.countDocuments({ status: 'SHIPPED' });
+
+        // Calculate total revenue from delivered orders
+        const deliveredOrders = await Order.find({ status: 'DELIVERED' }).select('totalAmount');
+        const totalRevenue = deliveredOrders.reduce((sum, order) => sum + (order.totalAmount || 0), 0);
 
         res.json({
             totalMedicines,
             lowStockCount: lowStock.length,
             pendingRefills,
             ordersToday,
-            // Expose counts for frontend: pending orders (in warehouse) and active shipments (shipped)
-            inWarehouseCount,
+            totalRevenue,
+            // Expose counts for frontend
+            processingCount,
             shippedCount,
-            // Backwards-compatible alias
-            pendingOrders: inWarehouseCount
+            // Main counts for frontend dashboard cards
+            pendingOrders: pendingCount,
+            inWarehouseCount: processingCount,
+            deliveredCount: deliveredOrders.length
         });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -45,21 +53,51 @@ exports.getAllOrders = async (req, res) => {
 exports.updateOrderStatus = async (req, res) => {
     try {
         const { status } = req.body;
-        const order = await Order.findByIdAndUpdate(req.params.id, { status }, { new: true });
+        const validStatuses = ['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'REJECTED'];
+
+        if (!validStatuses.includes(status)) {
+            return res.status(400).json({ error: 'Invalid status' });
+        }
+
+        const order = await Order.findById(req.params.id);
+        if (!order) return res.status(404).json({ error: 'Order not found' });
+
+        const previousStatus = order.status;
+
+        // Handle Stock Reversion for Cancelled/Rejected orders
+        const isReverting = ['REJECTED', 'CANCELLED'].includes(status);
+        const wasActive = !['REJECTED', 'CANCELLED'].includes(previousStatus);
+
+        if (isReverting && wasActive) {
+            // Add back to stock
+            for (const item of order.items) {
+                await Medicine.findByIdAndUpdate(item.medicineId, {
+                    $inc: { stock: item.quantity }
+                });
+            }
+        } else if (!isReverting && !wasActive) {
+            // Moving from Cancelled/Rejected back to Active? Deduct stock again.
+            for (const item of order.items) {
+                await Medicine.findByIdAndUpdate(item.medicineId, {
+                    $inc: { stock: -item.quantity }
+                });
+            }
+        }
+
+        order.status = status;
+        await order.save();
 
         // Create a notification for the user and emit real-time update
         try {
-            const msg = status === 'REJECTED'
-                ? `Your order ${order._id} was rejected. Please try again.`
-                : `Your order ${order._id} has been ${status.toLowerCase()}.`;
+            const msg = (status === 'REJECTED' || status === 'CANCELLED')
+                ? `Your order ${order._id} was ${status.toLowerCase()}.`
+                : `Your order ${order._id} has been updated to ${status.toLowerCase()}.`;
 
             const userNotif = new Notification({ userId: order.userId, type: 'order', message: msg });
             await userNotif.save();
 
             if (global.io) {
-                // notify the specific user
                 global.io.to(String(order.userId)).emit('order_status_updated', { order, message: msg });
-                // notify admin room to refresh counts/lists
                 global.io.to('admin').emit('order_updated_admin', order);
             }
         } catch (e) { console.error('notify error', e); }
@@ -77,12 +115,12 @@ exports.getAnalytics = async (req, res) => {
 
         // Get orders stats
         const totalOrders = await Order.countDocuments();
-        const confirmedOrders = await Order.countDocuments({ status: 'CONFIRMED' });
+        const pendingOrders = await Order.countDocuments({ status: 'PENDING' });
         const shippedOrders = await Order.countDocuments({ status: 'SHIPPED' });
-        const fulfilledOrders = await Order.countDocuments({ status: 'FULFILLED' });
+        const deliveredOrders = await Order.countDocuments({ status: 'DELIVERED' });
 
         // Calculate total revenue
-        const ordersWithAmount = await Order.find({ status: 'FULFILLED' }).select('totalAmount');
+        const ordersWithAmount = await Order.find({ status: 'DELIVERED' }).select('totalAmount');
         const totalRevenue = ordersWithAmount.reduce((sum, order) => sum + (order.totalAmount || 0), 0);
 
         // Inventory health
@@ -93,9 +131,9 @@ exports.getAnalytics = async (req, res) => {
             medicines,
             ordersStats: {
                 total: totalOrders,
-                confirmed: confirmedOrders,
+                pending: pendingOrders,
                 shipped: shippedOrders,
-                fulfilled: fulfilledOrders
+                delivered: deliveredOrders
             },
             inventoryHealth: {
                 totalItems: medicines.length,
@@ -175,6 +213,18 @@ exports.getInventoryDetails = async (req, res) => {
             },
             timestamp: new Date()
         });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+exports.getRefillAlerts = async (req, res) => {
+    try {
+        const alerts = await RefillAlert.find()
+            .populate('userId', 'name email phone')
+            .populate('medicineId', 'name stock price')
+            .sort({ daysLeft: 1 });
+        res.json(alerts);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }

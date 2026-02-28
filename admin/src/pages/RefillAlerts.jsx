@@ -1,24 +1,44 @@
 import { useState, useEffect } from 'react';
-import { Bell, AlertTriangle, RefreshCw, Send } from 'lucide-react';
-import { getMedicines, triggerRefillAlert, getInventoryDetails } from '../utils/api';
+import { io } from 'socket.io-client';
+import { Bell, AlertTriangle, RefreshCw, Send, BrainCircuit } from 'lucide-react';
+import { getMedicines, triggerRefillAlert, getInventoryDetails, getRefillAlerts, runRefillAnalysis } from '../utils/api';
 import toast from 'react-hot-toast';
 import { usePollingData } from '../hooks/usePollingData';
 
-const mockAlerts = [
-  { _id: 'a1', medicineName: 'Amoxicillin 500mg', medicineId: 'm1', stock: 0, status: 'EMPTY', daysLeft: 0, customer: 'Sarah Johnson', userId: 'u1' },
-  { _id: 'a2', medicineName: 'Lisinopril 10mg', medicineId: 'm2', stock: 85, status: 'LOW', daysLeft: 5, customer: 'Michael Chen', userId: 'u2' },
-  { _id: 'a3', medicineName: 'Sertraline 50mg', medicineId: 'm3', stock: 95, status: 'LOW', daysLeft: 7, customer: 'Emily Davis', userId: 'u3' },
-  { _id: 'a4', medicineName: 'Metformin 500mg', medicineId: 'm4', stock: 30, status: 'LOW', daysLeft: 3, customer: 'David Wilson', userId: 'u4' },
-];
-
 export default function RefillAlerts() {
-  const [alerts, setAlerts] = useState(mockAlerts);
+  const [alerts, setAlerts] = useState([]);
   const [lowStock, setLowStock] = useState([]);
   const [sending, setSending] = useState(null);
   const [tab, setTab] = useState('user');
+  const [analyzing, setAnalyzing] = useState(false);
 
-  // Use polling hook for real-time inventory updates (every 10 seconds)
-  const { data: inventoryData, loading, error, refetch } = usePollingData(
+  // 1. Fetch real predictive alerts from AI Analysis
+  const { data: alertData, refetch: refetchAlerts } = usePollingData(
+    () => getRefillAlerts().then(res => res.data),
+    10000,
+    true,
+    []
+  );
+
+  useEffect(() => {
+    if (alertData) {
+      const mapped = alertData.map(a => ({
+        _id: a._id,
+        medicineName: a.medicineId?.name || 'Unknown',
+        medicineId: a.medicineId?._id,
+        stock: a.medicineId?.stock || 0,
+        status: (a.medicineId?.stock || 0) === 0 ? 'EMPTY' : 'LOW',
+        daysLeft: a.daysLeft,
+        customer: a.userId?.name || 'Anonymous',
+        userId: a.userId?._id,
+        notified: a.notified
+      }));
+      setAlerts(mapped);
+    }
+  }, [alertData]);
+
+  // 2. Fetch inventory for current stock list
+  const { data: inventoryData, refetch: refetchInv } = usePollingData(
     () => getInventoryDetails().then(res => res.data),
     10000,
     true,
@@ -45,6 +65,24 @@ export default function RefillAlerts() {
       }));
     }
   }, [inventoryData]);
+
+  // Socket: Join admin room and listen for refill/stock alerts
+  useEffect(() => {
+    const socket = io(import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000');
+    socket.emit('join', { role: 'ADMIN' });
+
+    socket.on('refill_alert_admin', (data) => {
+      console.log('🔔 Admin: Proactive Refill Alert Received');
+      refetchAlerts(); // Refresh the predictive alerts
+    });
+
+    socket.on('stock_alert', (data) => {
+      console.log('🔔 Admin: Stock Alert Received');
+      refetchInv(); // Refresh the stock list
+    });
+
+    return () => { socket.disconnect(); };
+  }, [refetchAlerts, refetchInv]);
 
   const handleSendAlert = async (alert) => {
     setSending(alert._id);
@@ -78,9 +116,26 @@ export default function RefillAlerts() {
           <h1>Refill Alerts</h1>
           <p>Monitor stock levels and send refill notifications</p>
         </div>
-        <button className="btn btn-primary" onClick={handleSendAll}>
-          <Send size={16} /> Send All Alerts
-        </button>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <button
+            className="btn btn-secondary"
+            onClick={async () => {
+              setAnalyzing(true);
+              try {
+                await runRefillAnalysis();
+                toast.success('AI Refill Analysis started!');
+                refetchAlerts();
+              } catch (e) { toast.error('Analysis failed'); }
+              finally { setAnalyzing(false); }
+            }}
+            disabled={analyzing}
+          >
+            <BrainCircuit size={16} /> {analyzing ? 'Analyzing...' : 'Run AI Analysis'}
+          </button>
+          <button className="btn btn-primary" onClick={handleSendAll}>
+            <Send size={16} /> Send All Alerts
+          </button>
+        </div>
       </div>
 
       <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(3,1fr)', marginBottom: 24 }}>

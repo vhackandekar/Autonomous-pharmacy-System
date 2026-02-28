@@ -27,38 +27,9 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
-  // Dev helper: auto-login on localhost when no token present
+  // Initialize auth on mount
   useEffect(() => {
-    const autoLogin = async () => {
-      try {
-        if (!token && window?.location?.hostname === 'localhost') {
-          try {
-            console.log('🔐 Attempting auto-login with admin@pharmacy.com...');
-            // Try to login with demo credentials
-            const res = await apiLogin({ email: 'admin@pharmacy.com', password: 'admin123' });
-            const { token: t, user: u } = res.data;
-            localStorage.setItem('token', t);
-            localStorage.setItem('user', JSON.stringify(u));
-            setToken(t);
-            setUser(u);
-            console.log('✅ Auto-login successful with real JWT');
-          } catch (loginError) {
-            console.error('❌ Auto-login failed:', loginError.message);
-            console.error('Full error:', loginError);
-            // NO FALLBACK - require real login
-            console.warn('⚠️ Auto-login failed. Please manually login to proceed.');
-            setIsInitializing(false);
-            return;
-          }
-        }
-        setIsInitializing(false);
-      } catch (e) {
-        console.error('Auth initialization error:', e);
-        setIsInitializing(false);
-      }
-    };
-
-    autoLogin();
+    setIsInitializing(false);
   }, []);
 
   return (

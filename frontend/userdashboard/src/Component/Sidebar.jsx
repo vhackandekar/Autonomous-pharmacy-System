@@ -1,8 +1,8 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  LayoutDashboard, MessageSquare, ClipboardList, Activity, 
+import {
+  LayoutDashboard, MessageSquare, ClipboardList, Activity, FileText,
   Calendar, Settings, LogOut, Sun, Moon, User, ChevronRight, MapPin
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
@@ -18,11 +18,12 @@ const Sidebar = () => {
   const location = useLocation();
 
   const menuItems = [
-    { name: 'AI Chat',           icon: <MessageSquare size={20} />,  path: '/chat' },
-    { name: 'My Orders',         icon: <ClipboardList size={20} />,  path: '/orders' },
-    { name: 'History',           icon: <Calendar size={20} />,       path: '/history' },
-    { name: 'Dispatch Profile',  icon: <MapPin size={20} />,         path: '/profile' },
-    { name: 'Settings',          icon: <Settings size={20} />,       path: '/settings' },
+    { name: 'AI Chat', icon: <MessageSquare size={20} />, path: '/chat' },
+    { name: 'My Orders', icon: <ClipboardList size={20} />, path: '/orders' },
+    { name: 'Prescriptions', icon: <FileText size={20} />, path: '/prescriptions' },
+    { name: 'History', icon: <Calendar size={20} />, path: '/history' },
+    { name: 'Dispatch Profile', icon: <MapPin size={20} />, path: '/profile' },
+    { name: 'Settings', icon: <Settings size={20} />, path: '/settings' },
   ];
 
   const activeItem = menuItems.find(item => location.pathname === item.path) || menuItems[0];
@@ -31,7 +32,7 @@ const Sidebar = () => {
     <>
       <motion.aside
         initial={false}
-        animate={{ 
+        animate={{
           width: isCollapsed ? 80 : 260,
           translateX: (typeof window !== 'undefined' && window.innerWidth < 1024) ? (isMobileOpen ? 0 : -260) : 0
         }}
@@ -48,7 +49,7 @@ const Sidebar = () => {
             <Activity size={26} />
           </div>
           {!isCollapsed && (
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               className="overflow-hidden"
@@ -62,9 +63,9 @@ const Sidebar = () => {
         {/* Navigation */}
         <nav className="flex-1 px-3 space-y-2 mt-4 overflow-y-auto no-scrollbar">
           {!isCollapsed && (
-             <p className="typography-small opacity-20 px-4 mb-4 text-brand-sidebar-text-muted">Navigation</p>
+            <p className="typography-small opacity-20 px-4 mb-4 text-brand-sidebar-text-muted">Navigation</p>
           )}
-          
+
           {menuItems.map((item) => {
             const isActive = location.pathname === item.path;
             return (
@@ -77,25 +78,25 @@ const Sidebar = () => {
                 className={`
                   w-full flex items-center py-3.5 rounded-2xl transition-all duration-300 relative group
                   ${isCollapsed ? 'justify-center px-0' : 'px-5'}
-                  ${isActive 
+                  ${isActive
                     ? 'bg-brand-sidebar-active text-white shadow-lg shadow-brand-sidebar-active/30 scale-[1.02]'
                     : 'hover:bg-brand-sidebar-hover text-brand-sidebar-text-muted hover:text-white'
                   }
                 `}
               >
                 {isActive && (
-                  <motion.div 
+                  <motion.div
                     layoutId="sidebar-active-indicator"
                     className={`absolute left-0 w-1.5 h-6 rounded-r-full bg-white ${theme === 'dark' ? 'shadow-[0_0_15px_rgba(139,92,246,0.8)]' : 'shadow-[0_0_15px_rgba(255,255,255,0.4)]'}`}
                   />
                 )}
-                
+
                 <span className={`transition-all duration-300 group-hover:scale-110 ${isActive ? 'scale-110' : ''}`}>
                   {item.icon}
                 </span>
 
                 {!isCollapsed && (
-                  <motion.span 
+                  <motion.span
                     initial={{ opacity: 0, x: -10 }}
                     animate={{ opacity: 1, x: 0 }}
                     className="ml-4 text-sm font-bold whitespace-nowrap"
@@ -121,11 +122,11 @@ const Sidebar = () => {
         <div className="p-4 mt-auto space-y-4 border-t border-brand-sidebar-border">
           {!isCollapsed && (
             <div className={`flex items-center justify-between p-3 rounded-2xl transition-all duration-300 ${theme === 'dark' ? 'bg-white/5' : 'bg-slate-50 hover:bg-slate-100'}`}>
-               <div className="flex items-center space-x-2">
-                  {theme === 'dark' ? <Moon size={16} className="text-brand-accent" /> : <Sun size={16} className="text-amber-500" />}
-                  <span className="typography-small opacity-60 text-brand-sidebar-text-muted">Theme</span>
-               </div>
-               <Toggle enabled={theme === 'dark'} onChange={toggleTheme} />
+              <div className="flex items-center space-x-2">
+                {theme === 'dark' ? <Moon size={16} className="text-brand-accent" /> : <Sun size={16} className="text-amber-500" />}
+                <span className="typography-small opacity-60 text-brand-sidebar-text-muted">Theme</span>
+              </div>
+              <Toggle enabled={theme === 'dark'} onChange={toggleTheme} />
             </div>
           )}
           {isCollapsed && (

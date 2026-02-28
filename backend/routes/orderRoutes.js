@@ -5,7 +5,7 @@ const { verifyToken } = require('../middleware/auth');
 
 router.post('/place', verifyToken, orderController.placeOrder);
 router.get('/history/:userId', verifyToken, orderController.getHistory);
-router.get('/admin/all', verifyToken, orderController.getAdminOrders);
-router.put('/:orderId/status', verifyToken, orderController.updateOrderStatus);
+router.get('/:id', verifyToken, orderController.getOrderById);
+router.put('/:id/cancel', verifyToken, orderController.cancelOrder);
 
 module.exports = router;

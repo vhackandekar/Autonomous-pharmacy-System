@@ -3,6 +3,7 @@ const Medicine = require('../schema/Medicine');
 const InventoryLog = require('../schema/InventoryLog');
 const User = require('../schema/User');
 const Notification = require('../schema/Notification');
+const Prescription = require('../schema/Prescription');
 const axios = require('axios');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const Groq = require("groq-sdk");
@@ -13,7 +14,7 @@ class OrderPlacementAgent {
     constructor() {
         if (process.env.GEMINI_API_KEY) {
             this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-            this.geminiModel = this.genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+            this.geminiModel = this.genAI.getGenerativeModel({ model: "gemini-2.0-flash" }, { apiVersion: "v1" });
         }
         if (process.env.GROQ_API_KEY) {
             this.groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
@@ -21,10 +22,11 @@ class OrderPlacementAgent {
         this.langfuse = langfuse;
     }
 
-    async processOrder(userId, items, providedTotalAmount, parentTrace = null) {
+    async processOrder(userId, items, providedTotalAmount, parentTrace = null, sessionId = null) {
         const trace = parentTrace || (this.langfuse ? this.langfuse.trace({
             name: "order-placement-process",
             userId: userId.toString(),
+            sessionId: sessionId || "untracked-session",
             metadata: { itemsCount: items.length }
         }) : null);
 
@@ -34,12 +36,36 @@ class OrderPlacementAgent {
 
             for (const item of items) {
                 const medicine = await Medicine.findById(item.medicineId);
+                // 1. Stock check
+                if (!medicine || medicine.stock < (item.quantity || 1)) {
+                    throw new Error(`Insufficient stock for ${medicine?.name || 'requested medicine'}`);
+                }
+
+                // 2. Prescription check
+                if (medicine.prescriptionRequired) {
+                    const presc = await Prescription.findOne({
+                        userId,
+                        medicineId: item.medicineId,
+                        status: 'VERIFIED',
+                        validTill: { $gt: new Date() },
+                        $or: [
+                            { isReusable: true },
+                            { isUsed: false }
+                        ]
+                    });
+
+                    if (!presc) {
+                        throw new Error(`A verified prescription is required for ${medicine.name}. Please upload one and wait for verification.`);
+                    }
+                }
+
                 const price = medicine.price || 0;
                 const cost = price * (item.quantity || 1);
                 totalAmount += cost;
 
                 itemsWithPrices.push({
                     medicineId: item.medicineId,
+                    medicineName: medicine.name,
                     quantity: item.quantity || 1,
                     dosagePerDay: item.dosage || "As prescribed",
                     price: price
@@ -108,53 +134,41 @@ class OrderPlacementAgent {
                 userId,
                 items: itemsWithPrices,
                 totalAmount: finalTotal,
-                status: 'CONFIRMED',
+                status: 'PENDING',
+                paymentStatus: 'Pending',
+                paymentMethod: 'AI Assistant',
                 estimatedEndDate: estimatedEndDate
             });
 
             const savedOrder = await newOrder.save();
-
-            for (const item of items) {
-                const medicine = await Medicine.findByIdAndUpdate(item.medicineId, {
-                    $inc: { stock: -(item.quantity || 1) }
-                }, { returnDocument: 'after' });
-
-                await new InventoryLog({
-                    medicineId: item.medicineId,
-                    change: -(item.quantity || 1),
-                    reason: 'ORDER_PLACED'
-                }).save();
-
-                if (medicine.stock < 10 && !medicine.lowStockNotified && process.env.N8N_REFILL_WEBHOOK_URL) {
-                    axios.post(process.env.N8N_REFILL_WEBHOOK_URL, {
-                        type: 'STOCK_ALERT',
-                        medicineName: medicine.name,
-                        stockLeft: medicine.stock
-                    }).then(async () => {
-                        await Medicine.findByIdAndUpdate(item.medicineId, { lowStockNotified: true });
-                    }).catch(err => console.error("Low Stock Trigger Failed:", err.message));
-                }
-            }
 
             const user = await User.findById(userId);
             if (process.env.N8N_ORDER_WEBHOOK_URL) {
                 axios.post(process.env.N8N_ORDER_WEBHOOK_URL, {
                     orderId: savedOrder._id,
                     userId,
-                    phone: user.phone,
+                    phone: user?.phone,
                     status: 'FULFILLMENT_REQUESTED'
                 }).catch(err => console.error("n8n Trigger Failed:", err.message));
             }
 
             // Create notification in DB
-            await new Notification({
+            const notif = await new Notification({
                 userId,
                 type: 'order',
-                message: `Your order for ${itemsWithPrices.map(i => i.medicineId.name).join(', ')} has been confirmed! Order ID: ${savedOrder._id}`
+                message: `Your order for ${itemsWithPrices.map(i => i.medicineName).join(', ')} has been confirmed! Order ID: ${savedOrder._id}`
             }).save();
 
+            // --- REAL-TIME NOTIFICATION ---
+            if (global.io) {
+                // To User
+                global.io.to(String(userId)).emit('notification', notif);
+                // To Admin (About new order)
+                global.io.to('admin').emit('order_created', savedOrder);
+            }
+
             if (trace) await this.langfuse.flushAsync();
-            return { success: true, orderId: savedOrder._id, message: "Order placed successfully." };
+            return { success: true, orderId: savedOrder._id, order: savedOrder, message: "Order placed successfully." };
         } catch (error) {
             if (trace) {
                 trace.update({ statusMessage: error.message, metadata: { error: true } });
@@ -165,9 +179,11 @@ class OrderPlacementAgent {
         }
     }
 
-    async finalizeOrder(orderId, parentTrace = null) {
+    async finalizeOrder(orderId, parentTrace = null, sessionId = null) {
         const trace = parentTrace || (this.langfuse ? this.langfuse.trace({
             name: "order-finalization",
+            userId: orderId.toString(), // Usually order IDs aren't user IDs but good fallback
+            sessionId: sessionId || "untracked-session",
             metadata: { orderId: orderId.toString() }
         }) : null);
 
@@ -225,16 +241,35 @@ class OrderPlacementAgent {
 
             if (generation) generation.end({ output: estimatedEndDate.toISOString() });
 
-            // 2. UPDATE ORDER & STOCK
+            // 2. UPDATE ORDER, STOCK & PRESCRIPTION USAGE
             order.estimatedEndDate = estimatedEndDate;
-            order.status = 'Placed'; // Ensure it's marked as Placed
+            order.status = 'PENDING'; // Match aligned status enum
             await order.save();
 
             for (const item of order.items) {
+                // Update Stock
                 const med = await Medicine.findByIdAndUpdate(item.medicineId._id, {
                     $inc: { stock: -item.quantity },
                     lowStockNotified: false // Reset if they are refilling
                 }, { returnDocument: 'after' });
+
+                // Update Prescription Usage (Acute medicines)
+                if (med.prescriptionRequired) {
+                    const presc = await Prescription.findOne({
+                        userId: order.userId,
+                        medicineId: med._id,
+                        status: 'VERIFIED',
+                        validTill: { $gt: new Date() }
+                    }).sort({ createdAt: -1 });
+
+                    if (presc) {
+                        presc.usedCount += 1;
+                        if (!presc.isReusable) {
+                            presc.isUsed = true; // Mark as spent if acute
+                        }
+                        await presc.save();
+                    }
+                }
 
                 await new InventoryLog({
                     medicineId: item.medicineId._id,
@@ -243,14 +278,30 @@ class OrderPlacementAgent {
                 }).save();
 
                 // Low Stock Trigger (Only notify once until restocked)
-                if (med.stock < 10 && !med.lowStockNotified && process.env.N8N_REFILL_WEBHOOK_URL) {
-                    axios.post(process.env.N8N_REFILL_WEBHOOK_URL, {
-                        type: 'STOCK_ALERT',
-                        medicineName: med.name,
-                        stockLeft: med.stock
-                    }).then(async () => {
-                        await Medicine.findByIdAndUpdate(med._id, { lowStockNotified: true });
-                    }).catch(err => console.error("Low Stock Trigger Failed:", err.message));
+                if (med.stock < (med.lowStockThreshold || 10) && !med.lowStockNotified) {
+                    // 1. External Webhook (SMS/Alert)
+                    if (process.env.N8N_REFILL_WEBHOOK_URL) {
+                        axios.post(process.env.N8N_REFILL_WEBHOOK_URL, {
+                            type: 'STOCK_ALERT',
+                            medicineName: med.name,
+                            stockLeft: med.stock
+                        }).catch(err => console.error("Low Stock Webhook Failed:", err.message));
+                    }
+
+                    // 2. Persistent Admin Notification (UI)
+                    const adminNotif = await new Notification({
+                        recipientRole: 'ADMIN',
+                        type: 'stock_alert',
+                        message: `⚠️ Inventory Alert: ${med.name} is running critically low (${med.stock} units left).`
+                    }).save();
+
+                    // --- REAL-TIME ADMIN PUSH ---
+                    if (global.io) {
+                        global.io.to('admin').emit('stock_alert', adminNotif);
+                    }
+
+                    // 3. Mark as notified so we don't spam
+                    await Medicine.findByIdAndUpdate(med._id, { lowStockNotified: true });
                 }
             }
 
@@ -270,7 +321,7 @@ class OrderPlacementAgent {
 
             // Trigger Predictive Refill Analysis immediately to update their health dashboard
             const PredictiveRefillAgent = require('./PredictiveRefillAgent');
-            await PredictiveRefillAgent.analyzeAndAlert(order.userId, trace);
+            await PredictiveRefillAgent.analyzeAndAlert(order.userId, trace, sessionId);
 
             // For User
             await new Notification({

@@ -96,14 +96,14 @@ export const ChatProvider = ({ children }) => {
     }
   }, [currentMessages, currentSessionId]);
 
-  const addMessageToActive = async (msg) => {
+  const addMessageToActive = async (msg, skipChatTrigger = false) => {
     // Atomic update with duplicate check
     setCurrentMessages(prev => {
       if (prev.some(m => m.id === msg.id)) return prev;
       return [...prev, msg];
     });
 
-    if (msg.role === 'user') {
+    if (msg.role === 'user' && !skipChatTrigger) {
       setIsTyping(true);
       try {
         // Send history as an array of message objects {role, content}
@@ -125,9 +125,7 @@ export const ChatProvider = ({ children }) => {
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         };
 
-        addMessageToActive(aiMsg);
-
-
+        addMessageToActive(aiMsg, true); // Don't trigger AI for AI responses
 
         // Refresh Cart, Orders, and Notifications if the AI performed an action
         fetchCart();
@@ -140,10 +138,55 @@ export const ChatProvider = ({ children }) => {
           role: 'ai',
           content: "I'm sorry, I'm having trouble connecting to my knowledge base. Please ensure your AI API keys (Groq/Gemini) are valid and your server is running.",
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        });
+        }, true);
       } finally {
         setIsTyping(false);
       }
+    }
+  };
+
+  const uploadFile = async (file) => {
+    const formData = new FormData();
+    formData.append('prescription', file);
+
+    const userMsg = {
+      id: Date.now(),
+      role: 'user',
+      content: `[Uploaded Image: ${file.name}]`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+
+    addMessageToActive(userMsg, true); // Skip normal chat trigger for uploads
+    setIsTyping(true);
+
+    try {
+      const { data } = await api.post('/agent/chat/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+
+      const aiMsg = {
+        id: Date.now() + Math.random(),
+        role: 'ai',
+        content: data.agentResponse.answer,
+        metadata: data.agentResponse,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+
+      addMessageToActive(aiMsg);
+      fetchCart();
+      fetchOrders();
+      fetchNotifications();
+    } catch (error) {
+      console.error("File upload error:", error);
+      const errorMsg = error.response?.data?.message || error.response?.data?.error || "I encountered an error while processing your document. Please try a smaller file (Max 15MB).";
+      addMessageToActive({
+        id: Date.now() + 1000,
+        role: 'ai',
+        content: `I'm sorry, I couldn't process that: ${errorMsg}`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      });
+    } finally {
+      setIsTyping(false);
     }
   };
 
@@ -186,6 +229,7 @@ export const ChatProvider = ({ children }) => {
       loadSession,
       deleteSession,
       clearAllHistory,
+      uploadFile,
       isTyping
     }}>
       {children}

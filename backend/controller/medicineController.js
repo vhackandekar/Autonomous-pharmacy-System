@@ -11,6 +11,10 @@ exports.getAllMedicines = async (req, res) => {
 
 exports.addMedicine = async (req, res) => {
     try {
+        const { name, dosage, stock, price } = req.body;
+        if (!name || dosage === undefined || stock === undefined || price === undefined) {
+            return res.status(400).json({ error: 'Name, dosage, stock, and price are required' });
+        }
         const medicine = new Medicine(req.body);
         await medicine.save();
         res.status(201).json(medicine);

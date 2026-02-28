@@ -13,7 +13,7 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
     try {
-      const user = await login('admin@pharmacy.com', 'admin123');
+      const user = await login(form.email || 'admin1@pharmacy.com', form.password || 'admin123');
       if (user.role !== 'ADMIN') {
         toast.error('Admin access only');
         return;

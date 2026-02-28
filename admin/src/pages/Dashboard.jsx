@@ -17,11 +17,11 @@ import { useAuth } from '../context/AuthContext';
 
 const statusClass = (s) => {
   const m = {
-    CONFIRMED: 'confirmed',
+    PENDING: 'confirmed',
     REJECTED: 'rejected',
-    IN_WAREHOUSE: 'processing',
+    PROCESSING: 'processing',
     SHIPPED: 'shipped',
-    FULFILLED: 'delivered'
+    DELIVERED: 'delivered'
   };
   return m[s] || 'pending';
 };
@@ -151,14 +151,11 @@ export default function Dashboard() {
     socket.on('order_created', refresh);
     socket.on('order_updated_admin', refresh);
     socket.on('order_updated', refresh);
+    socket.on('stock_alert', refresh);
+    socket.on('refill_alert_admin', refresh);
 
     return () => { socket.disconnect(); };
   }, []);
-
-  const totalSales = orders.reduce(
-    (sum, order) => sum + (order.totalAmount || 0),
-    0
-  );
 
   if (loading) return (
     <div className="loading-state">
@@ -166,13 +163,6 @@ export default function Dashboard() {
       <p>Loading dashboard...</p>
     </div>
   );
-
-  const quickActions = [
-    { label: 'Add Medicine', icon: '💊', link: '/inventory' },
-    { label: 'View Orders', icon: '📦', link: '/orders' },
-    { label: 'Refill Alerts', icon: '🔔', link: '/refill-alerts' },
-    { label: 'AI Agent', icon: '🤖', link: '/agent-chat' },
-  ];
 
   return (
     <div>
@@ -188,7 +178,7 @@ export default function Dashboard() {
           <div className="stat-card-header">
             <div className="stat-icon green"><IndianRupee size={20} /></div>
           </div>
-          <div className="stat-value">₹{totalSales.toLocaleString()}</div>
+          <div className="stat-value">₹{(stats?.totalRevenue || 0).toLocaleString()}</div>
           <div className="stat-label">Total Sales</div>
         </div>
 
@@ -204,8 +194,8 @@ export default function Dashboard() {
           <div className="stat-card-header">
             <div className="stat-icon blue"><ShoppingCart size={20} /></div>
           </div>
-          <div className="stat-value">{stats?.inWarehouseCount ?? stats?.pendingOrders ?? 0}</div>
-          <div className="stat-label">Pending (In Warehouse)</div>
+          <div className="stat-value">{stats?.processingCount ?? stats?.pendingOrders ?? 0}</div>
+          <div className="stat-label">Orders Processing</div>
         </div>
 
         <div className="stat-card">
@@ -217,7 +207,7 @@ export default function Dashboard() {
           </div>
           <div className="stat-label">Active Shipments (Shipped)</div>
         </div>
-      </div>
+      </div >
 
       <div className="content-grid">
 
@@ -230,24 +220,24 @@ export default function Dashboard() {
             <ResponsiveContainer width="100%" height={200}>
               <AreaChart data={salesData}>
                 <CartesianGrid strokeDasharray="3 3" stroke={currentChartColors.grid} />
-                <XAxis 
-                  dataKey="day" 
-                  axisLine={false} 
+                <XAxis
+                  dataKey="day"
+                  axisLine={false}
                   tickLine={false}
                   tick={{ fill: currentChartColors.text, fontSize: 12 }}
                 />
-                <YAxis 
-                  axisLine={false} 
+                <YAxis
+                  axisLine={false}
                   tickLine={false}
                   tick={{ fill: currentChartColors.text, fontSize: 12 }}
                 />
                 <Tooltip content={<CustomTooltip />} />
-                <Area 
-                  type="monotone" 
-                  dataKey="sales" 
-                  stroke={currentChartColors.stroke} 
-                  fillOpacity={0.2} 
-                  fill={currentChartColors.fill} 
+                <Area
+                  type="monotone"
+                  dataKey="sales"
+                  stroke={currentChartColors.stroke}
+                  fillOpacity={0.2}
+                  fill={currentChartColors.fill}
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -306,6 +296,6 @@ export default function Dashboard() {
         </div>
 
       </div>
-    </div>
+    </div >
   );
 }

@@ -1,19 +1,34 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Settings as SettingsIcon, User, Bell, Shield, Database, Save, Moon, Sun, Palette } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { updateProfile } from '../utils/api';
 import toast from 'react-hot-toast';
 
 export default function Settings() {
-  const { user } = useAuth();
+  const { user, login: updateLocalUser } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [activeTab, setActiveTab] = useState('profile');
   const [profile, setProfile] = useState({
-    name: user?.name || 'System Admin',
-    email: user?.email || 'admin@pharmacy.com',
-    phone: user?.phone || '+91 98765 43210',
+    name: user?.name || '',
+    email: user?.email || '',
+    phone: user?.phone || '',
     role: user?.role || 'ADMIN'
   });
+  const [saving, setSaving] = useState(false);
+
+  // Sync profile when user context changes
+  useEffect(() => {
+    if (user) {
+      setProfile({
+        name: user.name || '',
+        email: user.email || '',
+        phone: user.phone || '',
+        role: user.role || 'ADMIN'
+      });
+    }
+  }, [user]);
+
   const [notifs, setNotifs] = useState({
     lowStock: true,
     newOrders: true,
@@ -21,6 +36,7 @@ export default function Settings() {
     deliveries: false,
     weeklyReport: true,
   });
+
   const [apiConfig, setApiConfig] = useState({
     baseUrl: 'http://localhost:5000/api',
     groqApiKey: '••••••••••••',
@@ -35,7 +51,24 @@ export default function Settings() {
     { id: 'api', label: 'API Config', icon: Database },
   ];
 
-  const handleSave = () => {
+  const handleSaveProfile = async () => {
+    setSaving(true);
+    try {
+      const { data } = await updateProfile({
+        name: profile.name,
+        phone: profile.phone
+      });
+      // Update global context so header/sidebar reflect changes
+      updateLocalUser && updateLocalUser(data, localStorage.getItem('token'));
+      toast.success('Profile updated successfully!');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to update profile');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveGeneral = () => {
     toast.success('Settings saved successfully!');
   };
 
@@ -54,7 +87,12 @@ export default function Settings() {
               key={id}
               onClick={() => setActiveTab(id)}
               className="nav-item"
-              style={{ marginBottom: 2, borderRadius: 8, background: activeTab === id ? 'var(--brand-dim)' : 'transparent', color: activeTab === id ? 'var(--brand)' : 'var(--text-secondary)' }}
+              style={{
+                marginBottom: 2,
+                borderRadius: 8,
+                background: activeTab === id ? 'var(--brand-dim)' : 'transparent',
+                color: activeTab === id ? 'var(--brand)' : 'var(--text-secondary)'
+              }}
             >
               <Icon size={16} /> {label}
             </button>
@@ -77,7 +115,7 @@ export default function Settings() {
                   fontSize: 32, fontWeight: 800, color: 'white',
                   marginBottom: 24
                 }}>
-                  {profile.name.split(' ').map(n => n[0]).join('')}
+                  {profile.name ? profile.name.split(' ').map(n => n[0]).join('') : 'A'}
                 </div>
                 {[
                   ['Full Name', 'name', 'text'],
@@ -90,7 +128,9 @@ export default function Settings() {
                       type={type}
                       className="form-control"
                       value={profile[key]}
+                      readOnly={key === 'email'}
                       onChange={e => setProfile(p => ({ ...p, [key]: e.target.value }))}
+                      style={key === 'email' ? { opacity: 0.6 } : {}}
                     />
                   </div>
                 ))}
@@ -98,8 +138,12 @@ export default function Settings() {
                   <label className="form-label">Role</label>
                   <input className="form-control" value={profile.role} disabled style={{ opacity: 0.6 }} />
                 </div>
-                <button className="btn btn-primary" onClick={handleSave}>
-                  <Save size={16} /> Save Profile
+                <button
+                  className="btn btn-primary"
+                  onClick={handleSaveProfile}
+                  disabled={saving}
+                >
+                  <Save size={16} /> {saving ? 'Saving...' : 'Save Profile'}
                 </button>
               </div>
             )}
@@ -121,8 +165,8 @@ export default function Settings() {
                         {theme === 'dark' ? 'Dark Mode' : 'Light Mode'}
                       </div>
                       <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                        {theme === 'dark' 
-                          ? 'AI-themed dark interface with modern design' 
+                        {theme === 'dark'
+                          ? 'AI-themed dark interface with modern design'
                           : 'Clean light interface with dark green accents'}
                       </div>
                     </div>
@@ -205,7 +249,7 @@ export default function Settings() {
                     </label>
                   </div>
                 ))}
-                <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={handleSave}>
+                <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={handleSaveGeneral}>
                   <Save size={16} /> Save Preferences
                 </button>
               </div>
@@ -269,7 +313,7 @@ export default function Settings() {
                   <strong>Auth:</strong> JWT Tokens<br />
                   <strong>Storage:</strong> Multer (Prescriptions)
                 </div>
-                <button className="btn btn-primary" onClick={handleSave}>
+                <button className="btn btn-primary" onClick={handleSaveGeneral}>
                   <Save size={16} /> Save Configuration
                 </button>
               </div>

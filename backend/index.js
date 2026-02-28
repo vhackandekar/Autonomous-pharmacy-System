@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const cron = require('node-cron');
+const { initCronJobs } = require('./utils/cronJobs');
 const PredictiveRefillAgent = require('./Agents/PredictiveRefillAgent');
 const User = require('./schema/User');
 
@@ -21,6 +22,7 @@ const prescriptionRoutes = require('./routes/prescriptionRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const webhookRoutes = require('./routes/webhookRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const paymentRoutes = require('./routes/paymentRoutes');
 
 //midlewares
 app.use(express.json());
@@ -46,6 +48,7 @@ app.use('/api/prescription', prescriptionRoutes);
 app.use('/api/notify', notificationRoutes);
 app.use('/webhook/n8n', webhookRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/payment', paymentRoutes);
 
 const port = process.env.PORT || 5000;
 //database connection – normalize URL (trim + strip quotes so .env parsing is robust)
@@ -58,46 +61,46 @@ if (!MONGODB_URL.startsWith('mongodb://') && !MONGODB_URL.startsWith('mongodb+sr
 const main = async () => {
     try {
         console.log("Connecting to MongoDB...");
-        await mongoose.connect(process.env.MONGODB_URL, {
+        await mongoose.connect(MONGODB_URL, {
             serverSelectionTimeoutMS: 20000, // Increase timeout to 20s
             family: 4 // Use IPv4
         });
         console.log("Connected successfully to the database");
 
-// Create HTTP server and attach Socket.IO for real-time notifications
-const server = http.createServer(app);
-const io = new Server(server, {
-    cors: {
-        origin: ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175'],
-        methods: ['GET', 'POST']
-    }
-});
-
-// Expose io on global so controllers can emit events without circular imports
-global.io = io;
-
-io.on('connection', (socket) => {
-    console.log('socket connected:', socket.id);
-    // client should send an initial `join` event with { role, userId }
-    socket.on('join', ({ role, userId } = {}) => {
-        try {
-            if (role === 'ADMIN') {
-                socket.join('admin');
-                console.log(`socket ${socket.id} joined admin room`);
+        // Create HTTP server and attach Socket.IO for real-time notifications
+        const server = http.createServer(app);
+        const io = new Server(server, {
+            cors: {
+                origin: ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175'],
+                methods: ['GET', 'POST']
             }
-            if (userId) {
-                socket.join(String(userId));
-                console.log(`socket ${socket.id} joined user room ${userId}`);
-            }
-        } catch (e) { console.error(e); }
-    });
-    socket.on('disconnect', () => { console.log('socket disconnected:', socket.id); });
-});
+        });
 
-server.listen(port, () => {
-    console.log("server running on ", port);
-});
-        app.listen(port, () => {
+        // Expose io on global so controllers can emit events without circular imports
+        global.io = io;
+
+        io.on('connection', (socket) => {
+            console.log('socket connected:', socket.id);
+            // client should send an initial `join` event with { role, userId }
+            socket.on('join', ({ role, userId } = {}) => {
+                try {
+                    if (role === 'ADMIN') {
+                        socket.join('admin');
+                        console.log(`socket ${socket.id} joined admin room`);
+                    }
+                    if (userId) {
+                        socket.join(String(userId));
+                        console.log(`socket ${socket.id} joined user room ${userId}`);
+                    }
+                } catch (e) { console.error(e); }
+            });
+            socket.on('disconnect', () => { console.log('socket disconnected:', socket.id); });
+        });
+
+        // Initialize Automated Background Tasks
+        initCronJobs();
+
+        server.listen(port, () => {
             console.log("Server running on port", port);
         });
     } catch (err) {
@@ -108,17 +111,3 @@ server.listen(port, () => {
 };
 
 main();
-
-// FR-9: Predictive Refill Cron Job (Runs every day at Midnight)
-cron.schedule('0 0 * * *', async () => {
-    console.log('Running daily predictive refill analysis...');
-    try {
-        const users = await User.find({ role: 'USER' });
-        for (const user of users) {
-            await PredictiveRefillAgent.analyzeAndAlert(user._id);
-        }
-        console.log('Daily predictive refill analysis completed.');
-    } catch (error) {
-        console.error('Cron Job Error:', error);
-    }
-});

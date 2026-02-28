@@ -12,7 +12,7 @@ class PredictiveRefillAgent {
     constructor() {
         if (process.env.GEMINI_API_KEY) {
             this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-            this.geminiModel = this.genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+            this.geminiModel = this.genAI.getGenerativeModel({ model: "gemini-2.0-flash" }, { apiVersion: "v1" });
         }
         if (process.env.GROQ_API_KEY) {
             this.groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
@@ -20,22 +20,47 @@ class PredictiveRefillAgent {
         this.langfuse = langfuse;
     }
 
-    async analyzeAndAlert(userId, parentTrace = null) {
+    async analyzeAndAlert(userId, parentTrace = null, sessionId = null) {
         // --- LANGFUSE TRACE START ---
         const trace = parentTrace || (this.langfuse ? this.langfuse.trace({
             name: "predictive-refill-analysis",
             userId: userId.toString(),
+            sessionId: sessionId || "untracked-session"
         }) : null);
 
         try {
+            const Prescription = require('../schema/Prescription');
             const history = await Order.find({ userId }).populate('items.medicineId');
+            const prescriptions = await Prescription.find({ userId, status: 'VERIFIED' });
+
             if (!history || history.length === 0) return { message: "No history to analyze." };
 
             const prompt = `
-        Analyze this user's medication history and predict when they will run out of EACH medicine.
-        History: ${JSON.stringify(history)}
-        Current Date: ${new Date().toISOString()}
-        Return ONLY a JSON array: [{"medicineId": "string", "medicineName": "string", "daysLeft": number, "predictionReason": "string"}]
+        # SYSTEM ROLE
+        You are an Expert Pharmacometrician Agent. Your task is to calculate the exactly "Days Left" for each medication based on clinical consumption rules.
+
+        # DATA CONTEXT
+        - Current Date: ${new Date().toISOString()}
+        - Medication History: ${JSON.stringify(history)}
+        - VERIFIED Prescriptions (for dosage reference): ${JSON.stringify(prescriptions.map(p => ({ medicine: p.medicineId, dosage: p.extractedData?.dosage, frequency: p.extractedData?.frequency })))}
+
+        # CALCULATION PROTOCOL (STRICT ADHERENCE REQUIRED)
+        1. For each medicine, find the MOST RECENT FULFILLED order.
+        2. Extract Quantity (Q) and Dosage (D).
+        3. IF a matching medicine exists in 'VERIFIED Prescriptions', prioritize the 'frequency' and 'dosage' from the prescription over the order history defaults.
+        4. Parse Dosage into units/day:
+           - "QD" or "Once a day" = 1
+           - "BID" or "Twice a day" = 2
+           - "TID" or "Thrice a day" = 3
+           - "QID" = 4
+           - If dosage contains a number like "2 tablets", assume that is per intake, multiplied by frequency. If frequency is missing, assume once a day (1 dose = 2 units).
+        4. Calculate Consumption (C): (Days passed since OrderDate) * (Units per day).
+        5. Calculated Residual (R): Quantity - Consumption.
+        6. Days Left (DL): R / (Units per day).
+        7. If Days Left < 0, return 0.
+
+        # OUTPUT FORMAT (STRICT JSON ARRAY)
+        Return ONLY a JSON array: [{"medicineId": "string", "medicineName": "string", "daysLeft": number, "predictionReason": "Calculation based on [Q] units - [C] units consumed"}]
       `;
 
             // --- LANGFUSE GENERATION START ---
@@ -140,14 +165,24 @@ class PredictiveRefillAgent {
                                 global.io.to('admin').emit('refill_alert_admin', populated);
                                 // Also send a direct message event to user with the refill message
                                 global.io.to(String(userId)).emit('refill_message', { message: populated.message, notification: populated });
+
+                                // --- NEW: Add to AgentLog for Chat Traceability ---
+                                const AgentLog = require('../schema/AgentLog');
+                                await new AgentLog({
+                                    userId,
+                                    agentName: 'PredictiveRefillAgent',
+                                    agentResponse: populated.message,
+                                    intent: 'REFILL_PROACTIVE',
+                                    workflowStatus: 'PROACTIVE_ALERT'
+                                }).save();
                             } catch (e) { console.error('predictive socket emit error', e); }
                         }
                     } catch (e) { console.error('predictive notif save error', e); }
                 } else {
-                    // Reset notification flag if user has refilled
+                    // Logic: If user has more than 5 days left (e.g., refilled), RESET the notified status
                     await RefillAlert.findOneAndUpdate(
                         { userId, medicineId: pred.medicineId },
-                        { notified: false },
+                        { notified: false, daysLeft: pred.daysLeft },
                         { upsert: false }
                     );
                 }
