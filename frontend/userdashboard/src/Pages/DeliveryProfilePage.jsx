@@ -9,12 +9,6 @@ import { useAuth } from '../context/AuthContext';
 import { authAPI } from '../services/api';
 import { Button, Badge } from '../Component/UI';
 
-const paymentMethods = [
-  { id: 'card', label: 'Credit / Debit Card', icon: CreditCard, desc: 'Visa, Mastercard, RuPay' },
-  { id: 'upi', label: 'UPI', icon: Wallet, desc: 'GPay, PhonePe, Paytm' },
-  { id: 'cod', label: 'Cash on Delivery', icon: Truck, desc: 'Pay when you receive' },
-  { id: 'net', label: 'Net Banking', icon: Landmark, desc: 'All major banks' },
-];
 const DeliveryProfilePage = () => {
   const { theme } = useTheme();
   const { user } = useAuth();
@@ -25,8 +19,7 @@ const DeliveryProfilePage = () => {
     address2: '',
     city: '',
     state: '',
-    pin: '',
-    payment: 'card'
+    pin: ''
   });
   const [saved, setSaved] = useState(false);
 
@@ -42,8 +35,7 @@ const DeliveryProfilePage = () => {
           address2: data.address2 || '',
           city: data.city || '',
           state: data.state || '',
-          pin: data.pin || '',
-          payment: data.preferredPayment || 'card'
+          pin: data.pin || ''
         }));
       } catch (error) {
         console.error("Failed to fetch profile:", error);
@@ -63,8 +55,7 @@ const DeliveryProfilePage = () => {
   const handleSave = async () => {
     try {
       await authAPI.updateProfile({
-        ...form,
-        preferredPayment: form.payment
+        ...form
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
@@ -137,42 +128,6 @@ const DeliveryProfilePage = () => {
           </div>
         </motion.div>
 
-        {/* Payment Mode */}
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className={cardBase}>
-          <div className="flex items-center space-x-2 mb-5">
-            <CreditCard size={16} className="text-brand-primary" />
-            <h3 className="font-black text-sm uppercase tracking-widest opacity-70">Preferred Payment</h3>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {paymentMethods.map(method => {
-              const Icon = method.icon;
-              const isSelected = form.payment === method.id;
-              return (
-                <button
-                  key={method.id}
-                  onClick={() => set('payment', method.id)}
-                  className={`flex items-center space-x-4 p-4 rounded-xl border text-left transition-all ${isSelected
-                    ? theme === 'dark'
-                      ? 'bg-brand-primary/15 border-brand-primary/40 text-brand-primary'
-                      : 'bg-brand-primary/8 border-brand-primary/30 text-brand-primary'
-                    : theme === 'dark'
-                      ? 'bg-white/3 border-white/8 hover:border-white/20 text-slate-400'
-                      : 'bg-slate-50 border-slate-200 hover:border-slate-300 text-slate-500'
-                    }`}
-                >
-                  <div className={`p-2 rounded-lg ${isSelected ? 'bg-brand-primary/20' : theme === 'dark' ? 'bg-white/5' : 'bg-slate-100'}`}>
-                    <Icon size={18} />
-                  </div>
-                  <div className="flex-1">
-                    <p className={`text-sm font-black ${isSelected ? '' : theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>{method.label}</p>
-                    <p className={`text-[10px] font-medium mt-0.5 ${isSelected ? 'opacity-60' : 'opacity-40'}`}>{method.desc}</p>
-                  </div>
-                  {isSelected && <Check size={16} className="text-brand-primary flex-shrink-0" />}
-                </button>
-              );
-            })}
-          </div>
-        </motion.div>
 
         {/* Save Button */}
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}>

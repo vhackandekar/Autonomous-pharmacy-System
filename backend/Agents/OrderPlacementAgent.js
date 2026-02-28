@@ -247,14 +247,9 @@ class OrderPlacementAgent {
             await order.save();
 
             for (const item of order.items) {
-                // Update Stock
-                const med = await Medicine.findByIdAndUpdate(item.medicineId._id, {
-                    $inc: { stock: -item.quantity },
-                    lowStockNotified: false // Reset if they are refilling
-                }, { returnDocument: 'after' });
-
                 // Update Prescription Usage (Acute medicines)
-                if (med.prescriptionRequired) {
+                const med = await Medicine.findById(item.medicineId._id);
+                if (med && med.prescriptionRequired) {
                     const presc = await Prescription.findOne({
                         userId: order.userId,
                         medicineId: med._id,
@@ -269,39 +264,6 @@ class OrderPlacementAgent {
                         }
                         await presc.save();
                     }
-                }
-
-                await new InventoryLog({
-                    medicineId: item.medicineId._id,
-                    change: -item.quantity,
-                    reason: 'ORDER_FULFILLED'
-                }).save();
-
-                // Low Stock Trigger (Only notify once until restocked)
-                if (med.stock < (med.lowStockThreshold || 10) && !med.lowStockNotified) {
-                    // 1. External Webhook (SMS/Alert)
-                    if (process.env.N8N_REFILL_WEBHOOK_URL) {
-                        axios.post(process.env.N8N_REFILL_WEBHOOK_URL, {
-                            type: 'STOCK_ALERT',
-                            medicineName: med.name,
-                            stockLeft: med.stock
-                        }).catch(err => console.error("Low Stock Webhook Failed:", err.message));
-                    }
-
-                    // 2. Persistent Admin Notification (UI)
-                    const adminNotif = await new Notification({
-                        recipientRole: 'ADMIN',
-                        type: 'stock_alert',
-                        message: `⚠️ Inventory Alert: ${med.name} is running critically low (${med.stock} units left).`
-                    }).save();
-
-                    // --- REAL-TIME ADMIN PUSH ---
-                    if (global.io) {
-                        global.io.to('admin').emit('stock_alert', adminNotif);
-                    }
-
-                    // 3. Mark as notified so we don't spam
-                    await Medicine.findByIdAndUpdate(med._id, { lowStockNotified: true });
                 }
             }
 

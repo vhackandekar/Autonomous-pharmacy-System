@@ -81,61 +81,20 @@ export default function Topbar() {
           allNotifs.push({
             id: notif._id,
             type: notif.type,
-            title: notif.type === 'refill' ? 'Refill Alert' : (notif.type === 'order' ? 'Order Update' : (notif.type === 'stock_alert' ? 'Low Stock Alert' : 'System Alert')),
+            title: notif.type === 'refill' ? 'Refill Alert' : (notif.type === 'order' ? 'Order Update' : (notif.type === 'stock_alert' ? 'Low Stock Alert' : (notif.type === 'prescription' ? 'Prescription Update' : 'System Alert'))),
             message: notif.message,
             time: new Date(notif.sentAt || notif.createdAt),
             icon: notif.type === 'refill' ? User : (notif.type === 'order' ? ShoppingCart : AlertTriangle),
-            link: notif.type === 'refill' ? '/refill-alerts' : '/orders',
+            link: notif.type === 'refill' ? '/refill-alerts' : (notif.type === 'stock_alert' ? '/inventory' : '/orders'),
             unread: !notif.isRead,
             isReal: true
           });
         });
 
-        // 2. Add synthetic pending orders (if not already covered)
-        const pendingOrders = (ordersRes.data || []).filter(o =>
-          o.status === 'PENDING' || o.status === 'CONFIRMED'
-        ).slice(0, 5);
-
-        pendingOrders.forEach(order => {
-          // Check if we already have a real notif for this order ID in the message
-          const exists = allNotifs.some(n => n.message.includes(order._id?.slice(-6).toUpperCase()));
-          if (!exists) {
-            allNotifs.push({
-              id: `order-${order._id}`,
-              type: 'order',
-              title: 'Pending Order',
-              message: `Order #${order._id?.slice(-6).toUpperCase()} - ₹${order.totalAmount?.toLocaleString()}`,
-              time: new Date(order.orderDate),
-              icon: ShoppingCart,
-              link: '/orders',
-              unread: true,
-              isReal: false
-            });
-          }
-        });
-
-        // 3. Add low stock medicines
-        const lowStock = (medicinesRes.data || []).filter(m => m.stock < (m.lowStockThreshold || 20)).slice(0, 5);
-        lowStock.forEach(med => {
-          const exists = allNotifs.some(n => n.message.includes(med.name));
-          if (!exists) {
-            allNotifs.push({
-              id: `stock-${med._id}`,
-              type: 'stock',
-              title: 'Low Stock Alert',
-              message: `${med.name} - Only ${med.stock} units left`,
-              time: new Date(),
-              icon: AlertTriangle,
-              link: '/inventory',
-              unread: true,
-              isReal: false
-            });
-          }
-        });
-
         // Sort by time (newest first)
         allNotifs.sort((a, b) => b.time - a.time);
-        setNotifications(allNotifs.slice(0, 15));
+        // UNREAD FILTER: Only show active alerts in the dropdown to avoid clutter
+        setNotifications(allNotifs.filter(n => n.unread).slice(0, 15));
       } catch (err) {
         console.error('Error fetching real notifications:', err);
       }

@@ -65,25 +65,58 @@ exports.updateOrderStatus = async (req, res) => {
         const order = await Order.findById(req.params.id);
         if (!order) return res.status(404).json({ error: 'Order not found' });
 
+        // CRITICAL: Prevent reverting from DELIVERED status
+        if (order.status === 'DELIVERED') {
+            return res.status(400).json({ error: 'Order is already delivered and cannot be modified.' });
+        }
+
         const previousStatus = order.status;
 
-        // Handle Stock Reversion for Cancelled/Rejected orders
-        const isReverting = ['REJECTED', 'CANCELLED'].includes(status);
-        const wasActive = !['REJECTED', 'CANCELLED'].includes(previousStatus);
+        // NEW LOGIC: Deduct stock ONLY when moving to DELIVERED status
+        if (status === 'DELIVERED' && previousStatus !== 'DELIVERED') {
+            const axios = require('axios');
+            for (const item of order.items) {
+                // 1. Deduct Stock
+                const med = await Medicine.findByIdAndUpdate(item.medicineId, {
+                    $inc: { stock: -item.quantity },
+                    lowStockNotified: false
+                }, { new: true });
 
-        if (isReverting && wasActive) {
-            // Add back to stock
-            for (const item of order.items) {
-                await Medicine.findByIdAndUpdate(item.medicineId, {
-                    $inc: { stock: item.quantity }
-                });
-            }
-        } else if (!isReverting && !wasActive) {
-            // Moving from Cancelled/Rejected back to Active? Deduct stock again.
-            for (const item of order.items) {
-                await Medicine.findByIdAndUpdate(item.medicineId, {
-                    $inc: { stock: -item.quantity }
-                });
+                if (!med) continue;
+
+                // 2. Log Inventory Change
+                const InventoryLog = require('../schema/InventoryLog');
+                await new InventoryLog({
+                    medicineId: med._id,
+                    change: -item.quantity,
+                    reason: 'ORDER_DELIVERED'
+                }).save();
+
+                // 3. Low Stock Check
+                if (med.stock < (med.reorderLevel || 10) && !med.lowStockNotified) {
+                    // Internal Admin Notification
+                    const adminNotif = new Notification({
+                        recipientRole: 'ADMIN',
+                        type: 'stock_alert',
+                        message: `⚠️ Inventory Alert: ${med.name} is running critically low (${med.stock} units left).`
+                    });
+                    await adminNotif.save();
+
+                    if (global.io) global.io.to('admin').emit('stock_alert', adminNotif);
+
+                    // Optional External Webhook
+                    if (process.env.N8N_REFILL_WEBHOOK_URL) {
+                        axios.post(process.env.N8N_REFILL_WEBHOOK_URL, {
+                            type: 'STOCK_ALERT',
+                            medicineName: med.name,
+                            stockLeft: med.stock
+                        }).catch(e => console.error('Webhook failed', e.message));
+                    }
+
+                    // Mark as notified
+                    med.lowStockNotified = true;
+                    await med.save();
+                }
             }
         }
 
@@ -92,16 +125,26 @@ exports.updateOrderStatus = async (req, res) => {
 
         // Create a notification for the user and emit real-time update
         try {
-            const msg = (status === 'REJECTED' || status === 'CANCELLED')
+            let msg = (status === 'REJECTED' || status === 'CANCELLED')
                 ? `Your order ${order._id} was ${status.toLowerCase()}.`
                 : `Your order ${order._id} has been updated to ${status.toLowerCase()}.`;
 
-            const userNotif = new Notification({ userId: order.userId, type: 'order', message: msg });
+            if (status === 'DELIVERED' && order.estimatedEndDate) {
+                msg = `✅ Your order has been delivered! Based on your dosage, we predict you will run out of medication around ${new Date(order.estimatedEndDate).toLocaleDateString()}. We'll notify you 2 days before then!`;
+            }
+
+            const userNotif = new Notification({ userId: order.userId, type: 'order', message: msg, orderId: order._id });
             await userNotif.save();
 
             if (global.io) {
                 global.io.to(String(order.userId)).emit('order_status_updated', { order, message: msg });
                 global.io.to('admin').emit('order_updated_admin', order);
+            }
+
+            // Trigger Predictive Refill Analysis immediately upon delivery
+            if (status === 'DELIVERED') {
+                const PredictiveRefillAgent = require('../Agents/PredictiveRefillAgent');
+                PredictiveRefillAgent.analyzeAndAlert(order.userId).catch(err => console.error('delivery refill analyze error', err));
             }
         } catch (e) { console.error('notify error', e); }
 

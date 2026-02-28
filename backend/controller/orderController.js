@@ -183,12 +183,8 @@ exports.cancelOrder = async (req, res) => {
             return res.status(400).json({ error: 'Order is already cancelled.' });
         }
 
-        // Revert stock
-        for (const item of order.items) {
-            await Medicine.findByIdAndUpdate(item.medicineId, {
-                $inc: { stock: item.quantity }
-            });
-        }
+        // No stock reversion needed here as stock isn't deducted until delivery.
+        // And we already block cancelling if status is DELIVERED.
 
         order.status = 'CANCELLED';
         await order.save();
