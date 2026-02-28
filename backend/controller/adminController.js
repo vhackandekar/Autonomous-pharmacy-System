@@ -9,8 +9,11 @@ exports.getStats = async (req, res) => {
         const totalMedicines = await Medicine.countDocuments();
         const lowStock = await Medicine.find({ stock: { $lt: 10 } });
         const pendingRefills = await RefillAlert.countDocuments({ notified: false });
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+
         const ordersToday = await Order.countDocuments({
-            createdAt: { $gte: new Date().setHours(0, 0, 0, 0) }
+            createdAt: { $gte: todayStart }
         });
 
         // Counts by shipment status for dashboard quick-stats

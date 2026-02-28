@@ -91,6 +91,7 @@ export const deleteVendor = (id) => api.delete(`/vendor/${id}`);
 export const getPurchaseOrders = () => api.get('/vendor/purchase');
 export const createPurchaseOrder = (data) => api.post('/vendor/purchase/create', data);
 export const cancelPurchaseOrder = (id) => api.put(`/vendor/purchase/cancel/${id}`);
+export const receivePurchaseOrder = (id) => api.put(`/vendor/purchase/receive/${id}`);
 export const getAIRestockDraft = () => api.get('/vendor/ai-restock-draft');
 export const addMedicineToVendor = (id, medicineIds) => api.post(`/vendor/${id}/medicines`, { medicineIds });
 export const removeMedicineFromVendor = (id, medicineId) => api.delete(`/vendor/${id}/medicines/${medicineId}`);

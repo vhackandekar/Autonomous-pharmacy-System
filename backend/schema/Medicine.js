@@ -9,8 +9,10 @@ const medicineSchema = new mongoose.Schema({
     unitType: { type: String }, // e.g., 'tablets', 'ml'
     description: { type: String },
     stock: { type: Number, required: true, default: 50 },
+    reorderLevel: { type: Number, default: 10 },
     lowStockNotified: { type: Boolean, default: false },
     price: { type: Number, required: true, default: 0 },
+    costPrice: { type: Number, default: 0 },
     prescriptionRequired: { type: Boolean, default: false },
 }, { timestamps: true });
 

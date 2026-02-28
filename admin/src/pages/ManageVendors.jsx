@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Plus, Trash2, Building2, Mail, Phone, MapPin, X, Clock, CreditCard, ChevronRight, Package, ShoppingBag, CheckCircle, AlertCircle, Sparkles, RefreshCw, Bot, Send, Search } from 'lucide-react';
-import { getVendors, addVendor, deleteVendor, getPurchaseOrders, getAIRestockDraft, createPurchaseOrder, cancelPurchaseOrder, getMedicines, addMedicineToVendor, removeMedicineFromVendor } from '../utils/api';
+import { getVendors, addVendor, deleteVendor, getPurchaseOrders, getAIRestockDraft, createPurchaseOrder, cancelPurchaseOrder, receivePurchaseOrder, getMedicines, addMedicineToVendor, removeMedicineFromVendor } from '../utils/api';
 import toast from 'react-hot-toast';
 import { usePollingData } from '../hooks/usePollingData';
 
@@ -148,6 +148,20 @@ export default function ManageVendors() {
       poRefetch();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to cancel order');
+    }
+  };
+
+  const handleReceivePO = async (id) => {
+    if (!confirm('Mark this purchase order as received? This will automatically add the items to your inventory levels.')) return;
+    try {
+      setSaving(true);
+      await receivePurchaseOrder(id);
+      toast.success('Inventory updated successfully!');
+      poRefetch(); // Refresh the list to show delivered status
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to update inventory');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -314,11 +328,11 @@ export default function ManageVendors() {
               <h3>Analyzing Sales Velocity...</h3>
               <p>Finding low stock items and best vendor match.</p>
             </div>
-          ) : aiDraft?.items?.length === 0 ? (
+          ) : (!aiDraft?.items || aiDraft.items.length === 0) ? (
             <div className="empty-state-card card">
               <CheckCircle size={48} style={{ color: 'var(--accent-green)' }} />
               <h3>Inventory Healthy</h3>
-              <p>{aiDraft.message}</p>
+              <p>{aiDraft?.message || "All inventory levels are optimal. No restocking required."}</p>
               <button className="btn btn-secondary" onClick={handleGenerateDraft}>
                 <RefreshCw size={14} style={{ marginRight: 8 }} /> Re-Analyze
               </button>
@@ -348,8 +362,8 @@ export default function ManageVendors() {
                 <div className="vendor-summary">
                   <Building2 size={24} />
                   <div>
-                    <h4>Primary Vendor: {aiDraft.vendor.name}</h4>
-                    <p>{aiDraft.vendor.email} • Estimated Lead Time: {aiDraft.vendor.leadTime} Days</p>
+                    <h4>Primary Vendor: {aiDraft?.vendor?.name || 'Unknown Vendor'}</h4>
+                    <p>{aiDraft?.vendor?.email} • Estimated Lead Time: {aiDraft?.vendor?.leadTime || 0} Days</p>
                   </div>
                 </div>
                 <div className="total-summary">
@@ -458,13 +472,36 @@ export default function ManageVendors() {
                         </td>
                         <td>
                           {po.status !== 'Cancelled' && po.status !== 'Delivered' && (
-                            <button
-                              className="btn-text-danger"
-                              onClick={() => handleCancelPO(po._id)}
-                              title="Cancel Order"
-                            >
-                              <X size={14} /> Cancel
-                            </button>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <button
+                                className="btn-text-brand"
+                                onClick={() => handleReceivePO(po._id)}
+                                title="Mark as Received"
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  color: 'var(--brand)',
+                                  fontWeight: '600',
+                                  fontSize: '13px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  cursor: 'pointer',
+                                  padding: '4px 8px',
+                                  borderRadius: '4px',
+                                  transition: 'background 0.2s'
+                                }}
+                              >
+                                <CheckCircle size={14} /> Receive
+                              </button>
+                              <button
+                                className="btn-text-danger"
+                                onClick={() => handleCancelPO(po._id)}
+                                title="Cancel Order"
+                              >
+                                <X size={14} /> Cancel
+                              </button>
+                            </div>
                           )}
                         </td>
                       </tr>
@@ -525,74 +562,76 @@ export default function ManageVendors() {
       )
       }
 
-      {showMedModal && selectedVendorForMeds && (
-        <div className="modal-overlay" onClick={() => setShowMedModal(false)}>
-          <div className="modal modal-lg" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="header-with-subtitle">
-                <h3>Manage Products: {selectedVendorForMeds.name}</h3>
-                <p>Assign medicines that can be ordered from this supplier</p>
-              </div>
-              <button className="icon-btn" onClick={() => setShowMedModal(false)}><X size={18} /></button>
-            </div>
-
-            <div className="medicine-manager-layout">
-              <div className="assigned-medicines">
-                <div className="section-title">Supplied Products ({selectedVendorForMeds.medicines?.length || 0})</div>
-                <div className="med-list-container">
-                  {selectedVendorForMeds.medicines?.map(med => (
-                    <div key={med._id} className="med-item assigned">
-                      <div className="med-info">
-                        <span className="med-name">{med.name}</span>
-                        <span className="med-meta">{med.dosage} • {med.unitType}</span>
-                      </div>
-                      <button className="remove-med-btn" onClick={() => handleRemoveMedFromVendor(med._id)}>
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ))}
-                  {(!selectedVendorForMeds.medicines || selectedVendorForMeds.medicines.length === 0) && (
-                    <div className="empty-mini">No medicines assigned yet.</div>
-                  )}
+      {
+        showMedModal && selectedVendorForMeds && (
+          <div className="modal-overlay" onClick={() => setShowMedModal(false)}>
+            <div className="modal modal-lg" onClick={e => e.stopPropagation()}>
+              <div className="modal-header">
+                <div className="header-with-subtitle">
+                  <h3>Manage Products: {selectedVendorForMeds.name}</h3>
+                  <p>Assign medicines that can be ordered from this supplier</p>
                 </div>
+                <button className="icon-btn" onClick={() => setShowMedModal(false)}><X size={18} /></button>
               </div>
 
-              <div className="available-medicines">
-                <div className="section-title">Available Inventory</div>
-                <div className="search-box-mini">
-                  <Search size={14} />
-                  <input
-                    placeholder="Search medicines to add..."
-                    value={medSearch}
-                    onChange={e => setMedSearch(e.target.value)}
-                  />
-                </div>
-                <div className="med-list-container">
-                  {allMedicines
-                    .filter(m => m.name.toLowerCase().includes(medSearch.toLowerCase()))
-                    .filter(m => !selectedVendorForMeds.medicines?.find(vm => vm._id === m._id))
-                    .map(med => (
-                      <div key={med._id} className="med-item available">
+              <div className="medicine-manager-layout">
+                <div className="assigned-medicines">
+                  <div className="section-title">Supplied Products ({selectedVendorForMeds.medicines?.length || 0})</div>
+                  <div className="med-list-container">
+                    {selectedVendorForMeds.medicines?.map(med => (
+                      <div key={med._id} className="med-item assigned">
                         <div className="med-info">
                           <span className="med-name">{med.name}</span>
-                          <span className="med-meta">{med.dosage}</span>
+                          <span className="med-meta">{med.dosage} • {med.unitType}</span>
                         </div>
-                        <button className="add-med-btn" onClick={() => handleAddMedToVendor(med)}>
-                          <Plus size={14} />
+                        <button className="remove-med-btn" onClick={() => handleRemoveMedFromVendor(med._id)}>
+                          <X size={14} />
                         </button>
                       </div>
-                    ))
-                  }
+                    ))}
+                    {(!selectedVendorForMeds.medicines || selectedVendorForMeds.medicines.length === 0) && (
+                      <div className="empty-mini">No medicines assigned yet.</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="available-medicines">
+                  <div className="section-title">Available Inventory</div>
+                  <div className="search-box-mini">
+                    <Search size={14} />
+                    <input
+                      placeholder="Search medicines to add..."
+                      value={medSearch}
+                      onChange={e => setMedSearch(e.target.value)}
+                    />
+                  </div>
+                  <div className="med-list-container">
+                    {allMedicines
+                      .filter(m => m.name.toLowerCase().includes(medSearch.toLowerCase()))
+                      .filter(m => !selectedVendorForMeds.medicines?.find(vm => vm._id === m._id))
+                      .map(med => (
+                        <div key={med._id} className="med-item available">
+                          <div className="med-info">
+                            <span className="med-name">{med.name}</span>
+                            <span className="med-meta">{med.dosage}</span>
+                          </div>
+                          <button className="add-med-btn" onClick={() => handleAddMedToVendor(med)}>
+                            <Plus size={14} />
+                          </button>
+                        </div>
+                      ))
+                    }
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="modal-footer">
-              <button className="btn btn-primary" onClick={() => setShowMedModal(false)}>Done</button>
+              <div className="modal-footer">
+                <button className="btn btn-primary" onClick={() => setShowMedModal(false)}>Done</button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      }
 
       <style jsx>{`
         .manage-vendors-page {
@@ -1025,6 +1064,6 @@ export default function ManageVendors() {
 
         .empty-mini { padding: 40px 20px; text-align: center; color: var(--text-muted); font-size: 13px; }
       `}</style>
-    </div>
+    </div >
   );
 }
