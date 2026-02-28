@@ -1,204 +1,185 @@
-const { GoogleGenerativeAI } = require("@google/generative-ai");
-const Groq = require("groq-sdk");
+const mongoose = require('mongoose');
+const axios = require('axios');
 const Order = require('../schema/Order');
+const Medicine = require('../schema/Medicine');
 const RefillAlert = require('../schema/RefillAlert');
 const User = require('../schema/User');
 const Notification = require('../schema/Notification');
-const axios = require('axios');
-
-const langfuse = require('../utils/langfuseClient');
 
 class PredictiveRefillAgent {
-    constructor() {
-        if (process.env.GEMINI_API_KEY) {
-            this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-            this.geminiModel = this.genAI.getGenerativeModel({ model: "gemini-2.0-flash" }, { apiVersion: "v1" });
-        }
-        if (process.env.GROQ_API_KEY) {
-            this.groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-        }
-        this.langfuse = langfuse;
-    }
-
-    async analyzeAndAlert(userId, parentTrace = null, sessionId = null) {
-        // --- LANGFUSE TRACE START ---
-        const trace = parentTrace || (this.langfuse ? this.langfuse.trace({
-            name: "predictive-refill-analysis",
-            userId: userId.toString(),
-            sessionId: sessionId || "untracked-session"
-        }) : null);
-
+    async analyzeAndAlert(userId) {
         try {
-            const Prescription = require('../schema/Prescription');
-            const history = await Order.find({ userId }).populate('items.medicineId');
-            const prescriptions = await Prescription.find({ userId, status: 'VERIFIED' });
+            console.log(`[PredictiveRefillAgent] 🔎 Analyzing User: ${userId}`);
 
-            if (!history || history.length === 0) return { message: "No history to analyze." };
+            // Find orders for the user
+            let history = await Order.find({ userId });
 
-            const prompt = `
-        # SYSTEM ROLE
-        You are an Expert Pharmacometrician Agent. Your task is to calculate the exactly "Days Left" for each medication based on clinical consumption rules.
-
-        # DATA CONTEXT
-        - Current Date: ${new Date().toISOString()}
-        - Medication History: ${JSON.stringify(history)}
-        - VERIFIED Prescriptions (for dosage reference): ${JSON.stringify(prescriptions.map(p => ({ medicine: p.medicineId, dosage: p.extractedData?.dosage, frequency: p.extractedData?.frequency })))}
-
-        # CALCULATION PROTOCOL (STRICT ADHERENCE REQUIRED)
-        1. For each medicine, find the MOST RECENT FULFILLED order.
-        2. Extract Quantity (Q) and Dosage (D).
-        3. IF a matching medicine exists in 'VERIFIED Prescriptions', prioritize the 'frequency' and 'dosage' from the prescription over the order history defaults.
-        4. Parse Dosage into units/day:
-           - "QD" or "Once a day" = 1
-           - "BID" or "Twice a day" = 2
-           - "TID" or "Thrice a day" = 3
-           - "QID" = 4
-           - If dosage contains a number like "2 tablets", assume that is per intake, multiplied by frequency. If frequency is missing, assume once a day (1 dose = 2 units).
-        4. Calculate Consumption (C): (Days passed since OrderDate) * (Units per day).
-        5. Calculated Residual (R): Quantity - Consumption.
-        6. Days Left (DL): R / (Units per day).
-        7. If Days Left < 0, return 0.
-
-        # OUTPUT FORMAT (STRICT JSON ARRAY)
-        Return ONLY a JSON array: [{"medicineId": "string", "medicineName": "string", "daysLeft": number, "predictionReason": "Calculation based on [Q] units - [C] units consumed"}]
-      `;
-
-            // --- LANGFUSE GENERATION START ---
-            const generation = trace ? trace.generation({
-                name: "PredictiveRefillAgent",
-                model: this.groq ? "llama-3.3-70b-versatile" : "gemini-2.0-flash",
-                input: prompt
-            }) : null;
-
-            let predictions = null;
-
-            // Choice 1: Groq
-            if (this.groq) {
-                try {
-                    const chatCompletion = await this.groq.chat.completions.create({
-                        messages: [{ role: "user", content: prompt }],
-                        model: "llama-3.3-70b-versatile",
-                        response_format: { type: "json_object" }
-                    });
-                    const content = JSON.parse(chatCompletion.choices[0].message.content);
-                    predictions = content.predictions || content; // Handle varying JSON structures
-                } catch (e) {
-                    console.error("Groq Refill Prediction Failed (Primary):", e.message);
-                    if (e.status === 429) {
-                        try {
-                            console.log("Using Groq Fallback (Llama 3.1 8b) for Refill Analysis...");
-                            const fallbackComp = await this.groq.chat.completions.create({
-                                messages: [{ role: "user", content: prompt }],
-                                model: "llama-3.1-8b-instant",
-                                response_format: { type: "json_object" }
-                            });
-                            const content = JSON.parse(fallbackComp.choices[0].message.content);
-                            predictions = content.predictions || content;
-                        } catch (fallbackErr) {
-                            console.error("Groq Refill Fallback Failed:", fallbackErr.message);
-                        }
-                    }
-                }
-            }
-
-            // Choice 2: Gemini
-            if (!predictions && this.geminiModel) {
-                try {
-                    const result = await this.geminiModel.generateContent(prompt);
-                    let text = result.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
-                    const content = JSON.parse(text);
-                    predictions = content.predictions || content;
-                } catch (e) {
-                    console.error("Gemini Refill Prediction Failed:", e.message);
-                }
-            }
-
-            if (generation) {
-                generation.end({
-                    output: JSON.stringify(predictions)
-                });
-            }
-
-            if (!predictions || !Array.isArray(predictions)) {
-                if (trace) await this.langfuse.flushAsync();
+            if (!history || history.length === 0) {
+                console.log(`[PredictiveRefillAgent] ❌ No orders found for user ${userId}`);
                 return [];
             }
 
-            const user = await User.findById(userId);
-            for (const pred of predictions) {
-                if (pred.daysLeft <= 5) {
-                    const existingAlert = await RefillAlert.findOne({ userId, medicineId: pred.medicineId });
+            // FIX #5: Sort by date (newest first)
+            history.sort((a, b) => new Date(b.orderDate || b.createdAt) - new Date(a.orderDate || a.createdAt));
 
-                    if (existingAlert && existingAlert.notified) {
-                        continue; // Skip if already notified
+            console.log(`[PredictiveRefillAgent] 📜 Found ${history.length} orders. Calculating consumption...`);
+
+            const predictions = [];
+            const processedMedicines = new Set(); // FIX #1: Track to dedupe
+            const now = new Date();
+
+            for (const order of history) {
+                // Must be DELIVERED or SHIPPED
+                if (order.status !== 'DELIVERED' && order.status !== 'SHIPPED') continue;
+
+                for (const item of order.items) {
+                    const medId = String(item.medicineId?._id || item.medicineId);
+                    
+                    // FIX #1: Skip if we already processed this medicine (kept newest)
+                    if (processedMedicines.has(medId)) {
+                        console.log(`[PredictiveRefillAgent] ⏭️  Skipping duplicate medicine ${medId}, already have newest order`);
+                        continue;
                     }
 
-                    await RefillAlert.findOneAndUpdate(
-                        { userId, medicineId: pred.medicineId },
-                        { daysLeft: pred.daysLeft, notified: true },
-                        { upsert: true, returnDocument: 'after' }
-                    );
+                    // Manual fetch for medicine to avoid population issues
+                    const medicine = await Medicine.findById(medId);
+                    const medicineName = medicine ? medicine.name : 'Medication';
 
-                    if (process.env.N8N_REFILL_WEBHOOK_URL) {
-                        axios.post(process.env.N8N_REFILL_WEBHOOK_URL, {
-                            userId: userId,
-                            phone: user.phone,
-                            medicineName: pred.medicineName,
-                            daysLeft: pred.daysLeft
-                        }, { timeout: 15000 }).catch(err => console.error("n8n Refill Trigger Failed:", err.message));
+                    const orderDate = new Date(order.orderDate || order.createdAt);
+                    const diffMs = now - orderDate;
+                    const daysPassed = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+                    // FIX #4: Parse dosage properly - extract both quantity AND frequency
+                    let unitsPerDay = 1;
+                    const dosageStr = String(item.dosagePerDay || '');
+                    
+                    // Pattern: "2 tablets" or "2 tablets 3 times daily" or "3 tablets BD"
+                    const quantityMatch = dosageStr.match(/(\d+)\s*(tablet|ml|dose|unit)/i);
+                    const frequencyMatch = dosageStr.match(/(\d+)\s*times?\s*(?:a\s*)?day|BD|BID|TID|QID|QD/i);
+                    
+                    let quantity = quantityMatch ? parseInt(quantityMatch[1], 10) : 1;
+                    let frequency = 1;
+                    
+                    if (frequencyMatch) {
+                        const freq = frequencyMatch[1] || frequencyMatch[0];
+                        if (freq === 'BD' || freq === 'BID') frequency = 2;
+                        else if (freq === 'TID') frequency = 3;
+                        else if (freq === 'QID') frequency = 4;
+                        else if (freq === 'QD') frequency = 1;
+                        else frequency = parseInt(freq, 10) || 1;
+                    }
+                    
+                    unitsPerDay = quantity * frequency;
+                    console.log(`[PredictiveRefillAgent] 📋 ${medicineName}: dosageStr="${dosageStr}" → ${quantity} × ${frequency} = ${unitsPerDay} units/day`);
+
+                    const totalConsumable = item.quantity;
+                    const consumed = daysPassed * unitsPerDay;
+                    const remaining = totalConsumable - consumed;
+                    
+                    // FIX #3: Track both daysLeft AND isOverdue
+                    let daysLeft = 0;
+                    let isOverdue = false;
+                    
+                    if (remaining > 0) {
+                        daysLeft = Math.round(remaining / unitsPerDay);
+                    } else {
+                        daysLeft = 0;
+                        isOverdue = true; // FIX #3: Flag overdue
                     }
 
-                    // Create notification in DB and emit via socket so UI updates in real-time
-                    try {
-                        const notif = await new Notification({
-                            userId,
-                            type: 'refill',
-                            message: `Reminder: You will run out of ${pred.medicineName} in about ${pred.daysLeft} days. Don't forget to refill!`
-                        }).save();
+                    // Calculate the exact predicted refill date
+                    const refillDate = new Date(now.getTime() + (daysLeft * 24 * 60 * 60 * 1000));
 
-                        if (global.io) {
-                            try {
-                                // Populate user info so admin sees customer details
-                                const NotificationModel = require('../schema/Notification');
-                                const populated = await NotificationModel.findById(notif._id).populate('userId', 'name email phone');
-                                // Send only admin-facing refill alert (list of customers)
-                                global.io.to('admin').emit('refill_alert_admin', populated);
-                                // Also send a direct message event to user with the refill message
-                                global.io.to(String(userId)).emit('refill_message', { message: populated.message, notification: populated });
+                    console.log(`[PredictiveRefillAgent] -> ${medicineName}: Stock=${totalConsumable}, Consumption=${consumed}, DaysPassed=${daysPassed}, Predicted DaysLeft=${daysLeft}, Overdue=${isOverdue}, RefillDate=${refillDate.toDateString()}`);
 
-                                // --- NEW: Add to AgentLog for Chat Traceability ---
-                                const AgentLog = require('../schema/AgentLog');
-                                await new AgentLog({
-                                    userId,
-                                    agentName: 'PredictiveRefillAgent',
-                                    agentResponse: populated.message,
-                                    intent: 'REFILL_PROACTIVE',
-                                    workflowStatus: 'PROACTIVE_ALERT'
-                                }).save();
-                            } catch (e) { console.error('predictive socket emit error', e); }
-                        }
-                    } catch (e) { console.error('predictive notif save error', e); }
-                } else {
-                    // Logic: If user has more than 5 days left (e.g., refilled), RESET the notified status
-                    await RefillAlert.findOneAndUpdate(
-                        { userId, medicineId: pred.medicineId },
-                        { notified: false, daysLeft: pred.daysLeft },
-                        { upsert: false }
-                    );
+                    predictions.push({
+                        medicineId: medId,
+                        medicineName,
+                        daysLeft,
+                        isOverdue, // FIX #3
+                        refillDate: refillDate.toISOString(),
+                        predictionReason: `Calculated from Q=${totalConsumable} minus consumed=${consumed} (${unitsPerDay} units/day)`
+                    });
+
+                    // FIX #1: Mark this medicine as processed
+                    processedMedicines.add(medId);
                 }
             }
 
-            if (trace) await this.langfuse.flushAsync();
-            return predictions;
-        } catch (error) {
-            if (trace) {
-                trace.update({
-                    statusMessage: error.message,
-                    metadata: { error: true }
-                });
-                await this.langfuse.flushAsync();
+            // Notification Trigger Logic
+            const userObj = await User.findById(userId);
+
+            // FIX #6: Dedupe alert triggers - group by medicineId
+            const medicineMap = new Map();
+            for (const pred of predictions) {
+                if (!medicineMap.has(pred.medicineId) || pred.daysLeft < medicineMap.get(pred.medicineId).daysLeft) {
+                    medicineMap.set(pred.medicineId, pred);
+                }
             }
-            console.error("PredictiveRefillAgent Error:", error);
+
+            for (const [medId, pred] of medicineMap) {
+                const existingAlert = await RefillAlert.findOne({ userId, medicineId: medId });
+
+                // FIX #2: Reset notified flag when daysLeft > 5 (user refilled)
+                if (existingAlert && existingAlert.notified && pred.daysLeft > 5) {
+                    console.log(`[PredictiveRefillAgent] 🔄 Resetting alert for ${pred.medicineName} (user refilled, daysLeft=${pred.daysLeft})`);
+                    await RefillAlert.findOneAndUpdate(
+                        { userId, medicineId: medId },
+                        { notified: false, daysLeft: pred.daysLeft }
+                    );
+                    continue; // Don't send alert
+                }
+
+                // Skip if already notified (within same cycle)
+                if (existingAlert && existingAlert.notified) {
+                    console.log(`[PredictiveRefillAgent] 🔕 Alert already sent for ${pred.medicineName}, skipping.`);
+                    continue;
+                }
+
+                // Trigger alert if <= 5 days OR already overdue
+                if (pred.daysLeft <= 5 || pred.isOverdue) {
+                    console.log(`[PredictiveRefillAgent] 🚨 TRIGGERING REFILL ALERT for ${pred.medicineName} (DaysLeft=${pred.daysLeft}, Overdue=${pred.isOverdue})`);
+
+                    await RefillAlert.findOneAndUpdate(
+                        { userId, medicineId: medId },
+                        { daysLeft: pred.daysLeft, notified: true, isOverdue: pred.isOverdue }, // FIX #3
+                        { upsert: true }
+                    );
+
+                    // Webhook Trigger
+                    const webhookUrl = process.env.N8N_REFILL_WEBHOOK_URL;
+                    if (webhookUrl) {
+                        console.log(`[PredictiveRefillAgent] 🌐 Sending n8n webhook...`);
+                        axios.post(webhookUrl, {
+                            userId: userId.toString(),
+                            phone: userObj?.phone || 'N/A',
+                            medicineName: pred.medicineName,
+                            daysLeft: pred.daysLeft,
+                            isOverdue: pred.isOverdue,
+                            predictedRefillDate: pred.refillDate
+                        }).then(() => console.log(`[PredictiveRefillAgent] ✅ Webhook sent for ${pred.medicineName}`))
+                            .catch(err => console.error(`[PredictiveRefillAgent] ❌ Webhook failed: ${err.message}`));
+                    }
+
+                    // Notification save
+                    const urgency = pred.isOverdue ? "⚠️ URGENT - " : "";
+                    const notif = await new Notification({
+                        userId,
+                        type: 'refill',
+                        message: `${urgency}Reminder: You will run out of ${pred.medicineName} in about ${pred.daysLeft} days. Refill now!`
+                    }).save();
+
+                    // Real-time push
+                    if (global.io) {
+                        global.io.to('admin').emit('refill_alert_admin', { ...notif.toObject(), userId: userObj });
+                        global.io.to(String(userId)).emit('refill_message', { message: notif.message, notification: notif });
+                    }
+                }
+            }
+
+            return Array.from(medicineMap.values());
+        } catch (error) {
+            console.error("PredictiveRefillAgent Critical Failure:", error);
             return [];
         }
     }

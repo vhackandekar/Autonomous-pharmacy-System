@@ -135,24 +135,11 @@ exports.chatUpload = async (req, res) => {
                 doctorName: analysis.doctorName,
                 issuedDate: analysis.issuedDate,
                 dosage: analysis.dosage,
-                ocrRawText: analysis.ocrRawText,
-                validationNotes: analysis.validationNotes,
-                medicineValidation: medicineValidation // Store validation result
+                validationNotes: analysis.validationNotes
             }
         });
 
         await presc.save();
-
-        // If medicine validation fails, set error message
-        if (!medicineValidation.isValid) {
-            return res.json({
-                agentResponse: {
-                    answer: `The prescription does not mention ${targetMedicine.name}. The document appears to contain: ${medicineValidation.detectedMedicines ? medicineValidation.detectedMedicines.join(', ') : 'no recognizable medicines'}. Please upload the correct prescription.`,
-                    intent: 'UPLOAD_REJECTION',
-                    reason: medicineValidation.reason
-                }
-            });
-        }
 
         // Generate final context-aware response
         let responseText = `I've processed the document. ${analysis.validationNotes}`;
@@ -184,7 +171,7 @@ exports.chatUpload = async (req, res) => {
                 userMessage: `[File Upload: ${file.originalname}]`,
                 agentResponse: responseText,
                 intent: 'UPLOAD_PRESCRIPTION',
-                workflowStatus: isValidAndConfident ? 'VERIFIED' : 'REJECTED'
+                workflowStatus: analysis.status || 'PENDING'
             }).save();
         } catch (logErr) {
             console.error("Error logging agent action:", logErr);

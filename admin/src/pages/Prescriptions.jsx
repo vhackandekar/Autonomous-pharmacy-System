@@ -254,23 +254,7 @@ export default function Prescriptions() {
                                     <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Dosage (Extracted)</label>
                                     <div style={{ fontWeight: 600, color: 'var(--brand)' }}>{selectedItem.extractedData?.dosage || "Not identified"}</div>
                                 </div>
-                                {selectedItem.extractedData?.ocrRawText && (
-                                    <div style={{ gridColumn: 'span 2' }}>
-                                        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Raw Scanned Text</label>
-                                        <div style={{
-                                            fontSize: 10,
-                                            color: 'var(--text-secondary)',
-                                            background: 'var(--bg-tertiary)',
-                                            padding: 8,
-                                            borderRadius: 8,
-                                            maxHeight: 60,
-                                            overflowY: 'auto',
-                                            whiteSpace: 'pre-wrap'
-                                        }}>
-                                            {selectedItem.extractedData.ocrRawText}
-                                        </div>
-                                    </div>
-                                )}
+
                             </div>
 
                             <div className="form-group" style={{ marginTop: 'auto' }}>

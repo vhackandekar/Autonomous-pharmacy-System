@@ -136,7 +136,6 @@ async function processOCRTask(id, filePath) {
             doctorName: result.doctorName,
             issuedDate: result.issuedDate,
             dosage: result.dosage,
-            ocrRawText: result.ocrRawText,
             validationNotes: result.validationNotes,
             medicineValidation: medicineValidation // Store validation result
         };

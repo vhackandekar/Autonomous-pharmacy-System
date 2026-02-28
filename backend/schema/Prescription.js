@@ -36,12 +36,8 @@ const prescriptionSchema = new mongoose.Schema({
         doctorName: { type: String },
         issuedDate: { type: Date },
         dosage: { type: String },
-        ocrRawText: { type: String },
         validationNotes: { type: String }
     }
 }, { timestamps: true });
-
-// Auto-expire logic (Index for performance)
-prescriptionSchema.index({ validTill: 1 }, { expireAfterSeconds: 0 });
 
 module.exports = mongoose.model('Prescription', prescriptionSchema);

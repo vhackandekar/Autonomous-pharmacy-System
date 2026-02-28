@@ -20,7 +20,7 @@ class PrescriptionAgent {
             const absolutePath = path.resolve(imagePath);
             console.log(`[PRESCRIPTION_AGENT] Processing: ${absolutePath}`);
 
-            // 1. OCR EXECUTION (Hign Fidelity Worker)
+            // 1. OCR EXECUTION (High fidelity worker)
             worker = await Tesseract.createWorker('eng');
             const result = await worker.recognize(absolutePath);
             const { text: rawText, confidence } = result.data;
@@ -36,7 +36,6 @@ class PrescriptionAgent {
             const validation = await this._runRules(extracted);
 
             return {
-                ocrRawText: rawText,
                 confidence: Math.round(confidence),
                 ...extracted,
                 ...validation
