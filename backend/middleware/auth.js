@@ -5,15 +5,8 @@ exports.verifyToken = (req, res, next) => {
     console.log('🔐 Token auth check. Received token:', token?.slice(0, 30) + '...');
 
     if (!token) {
-      console.log('❌ No token provided');
-      return res.status(401).json({ error: "Access denied. No token provided." });
-    }
-
-    // Dev mode: Accept demo tokens on localhost
-    if (token === 'demo-token-123') {
-        console.log('✅ Demo token accepted');
-        req.user = { id: '1', name: 'Admin', email: 'admin@pharmacy.com', role: 'ADMIN' };
-        return next();
+        console.log('❌ No token provided');
+        return res.status(401).json({ error: "Access denied. No token provided." });
     }
 
     try {

@@ -44,6 +44,9 @@ export const notificationAPI = {
 
 export const agentAPI = {
   chat: (userMessage, history) => api.post('/agent/chat', { userMessage, history }),
+  uploadPrescription: (formData) => api.post('/agent/chat/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
 };
 
 export const medicineAPI = {
@@ -53,14 +56,22 @@ export const medicineAPI = {
 export const orderAPI = {
   place: (orderData) => api.post('/order/place', orderData),
   getHistory: (userId) => api.get(`/order/history/${userId}`),
+  cancelOrder: (orderId) => api.put(`/order/${orderId}/cancel`),
+  getOrderDetails: (orderId) => api.get(`/order/${orderId}`),
 };
 
 export const prescriptionAPI = {
   upload: (formData) => api.post('/prescription/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
+  getMy: () => api.get('/prescription/my'),
+  delete: (id) => api.delete(`/prescription/${id}`),
 };
 
 
+
+export const stockAlertAPI = {
+  subscribe: (medicineId) => api.post('/stock-alert/subscribe', { medicineId }),
+};
 
 export default api;

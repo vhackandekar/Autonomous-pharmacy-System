@@ -20,5 +20,4 @@ router.get('/:id/medicines', verifyToken, isAdmin, vendorController.getVendorMed
 router.delete('/:id/medicines/:medicineId', verifyToken, isAdmin, vendorController.removeMedicineFromVendor);
 
 router.get('/ping', (req, res) => res.json({ status: 'ok', route: 'vendor' }));
-
 module.exports = router;

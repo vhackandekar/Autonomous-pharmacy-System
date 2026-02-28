@@ -2,14 +2,17 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
+import { AgentProvider } from './context/AgentContext';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
 import Orders from './pages/Orders';
 import AdminAIChat from './pages/AdminAIChat';
+import AgentChat from './pages/AgentChat';
 import ManageVendors from './pages/ManageVendors';
 import Settings from './pages/Settings';
+import Prescriptions from './pages/Prescriptions';
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, user, isInitializing } = useAuth();
@@ -49,7 +52,10 @@ function AppRoutes() {
       <Route path="/inventory" element={<ProtectedRoute><Inventory /></ProtectedRoute>} />
       <Route path="/orders" element={<ProtectedRoute><Orders /></ProtectedRoute>} />
       <Route path="/ai-intelligence" element={<ProtectedRoute><AdminAIChat /></ProtectedRoute>} />
+
+      <Route path="/agent-chat" element={<ProtectedRoute><AgentProvider><AgentChat /></AgentProvider></ProtectedRoute>} />
       <Route path="/manage-vendors" element={<ProtectedRoute><ManageVendors /></ProtectedRoute>} />
+      <Route path="/prescriptions" element={<ProtectedRoute><Prescriptions /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/dashboard" />} />
     </Routes>

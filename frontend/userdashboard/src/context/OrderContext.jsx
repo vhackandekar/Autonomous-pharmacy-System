@@ -26,7 +26,7 @@ export const OrderProvider = ({ children }) => {
         dosage: order.items[0]?.dosagePerDay || "As directed",
         qty: order.items.reduce((sum, i) => sum + i.quantity, 0),
         price: order.totalAmount,
-        status: order.status.charAt(0) + order.status.slice(1).toLowerCase(),
+        status: order.status, // Keep original status for logic, format in UI if needed
         date: new Date(order.orderDate).toLocaleDateString(),
         estimate: order.estimatedEndDate ? new Date(order.estimatedEndDate).toLocaleDateString() : 'Processing',
         image: '💊'
@@ -36,6 +36,17 @@ export const OrderProvider = ({ children }) => {
       console.error("Failed to fetch orders:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const cancelOrder = async (orderId) => {
+    try {
+      await orderAPI.cancelOrder(orderId);
+      await fetchOrders();
+      alert("Order cancelled successfully");
+    } catch (error) {
+      console.error("Failed to cancel order:", error);
+      alert("Failed to cancel order");
     }
   };
 
@@ -52,6 +63,8 @@ export const OrderProvider = ({ children }) => {
           price: item.medicineId.price,
           qty: item.quantity,
           dosage: item.medicineId.description || item.medicineId.dosage || 'Pharmacist pick',
+          prescriptionRequired: item.medicineId.prescriptionRequired,
+          prescriptionStatus: item.prescriptionStatus,
           image: '💊' // In future, use item.medicineId.image
         }));
         setCart(mappedCart);
@@ -241,7 +254,7 @@ export const OrderProvider = ({ children }) => {
   return (
     <OrderContext.Provider value={{
       orders, cart, stats, notifications, loading,
-      placeOrder, reorder,
+      placeOrder, reorder, cancelOrder,
       addToCart, removeFromCart, updateCartQty, placeCartOrder, clearCart,
       fetchOrders, fetchCart, fetchNotifications, markNotificationAsRead, markAllNotificationsAsRead
     }}>

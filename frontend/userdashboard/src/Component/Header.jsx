@@ -1,4 +1,4 @@
-import { Search, Bell, User, Settings, LogOut, ChevronDown, PanelLeftClose, PanelLeft, ShoppingCart } from 'lucide-react';
+import { Bell, User, Settings, LogOut, ChevronDown, PanelLeftClose, PanelLeft, ShoppingCart } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { useSidebar } from '../context/SidebarContext';
@@ -40,16 +40,6 @@ const Header = () => {
               {isCollapsed ? <PanelLeft size={22} /> : <PanelLeftClose size={22} />}
             </div>
           </button>
-
-          {/* Search Bar */}
-          <div className="relative group hidden md:block">
-            <Search className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors ${theme === 'dark' ? 'text-brand-text-secondary group-focus-within:text-brand-primary' : 'text-slate-400 group-focus-within:text-brand-primary'}`} size={18} />
-            <input
-              type="text"
-              placeholder="Search prescriptions, orders..."
-              className={`pl-12 pr-6 py-2.5 w-[320px] rounded-[1rem] text-sm font-medium border transition-all placeholder:opacity-40 focus:outline-none focus:ring-4 ${theme === 'dark' ? 'bg-white/5 border-white/10 focus:ring-brand-primary/20 focus:border-brand-primary/50' : 'bg-slate-50 border-slate-200 focus:ring-blue-500/10 focus:border-blue-500/50'}`}
-            />
-          </div>
         </div>
 
         <div className="flex items-center space-x-2">
@@ -72,9 +62,10 @@ const Header = () => {
             trigger={
               <button className={`relative p-2.5 rounded-xl transition-all active:scale-95 ${theme === 'dark' ? 'hover:bg-white/5 text-slate-400' : 'hover:bg-slate-100 text-slate-500'}`}>
                 <Bell size={22} />
-                {notifications.some(n => !n.isRead) && (
+                {notifications.some(n => !n.isRead && ['refill', 'order', 'prescription', 'medicine_available'].includes(n.type)) && (
                   <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-brand-primary border-2 border-brand-card shadow-[0_0_8px_rgba(37,99,235,0.6)]" />
                 )}
+
               </button>
             }
           >
@@ -90,33 +81,36 @@ const Header = () => {
               </div>
 
               <div className="flex-1 overflow-y-auto py-2 no-scrollbar">
-                {notifications.length === 0 ? (
+                {notifications.filter(n => ['refill', 'order', 'prescription', 'medicine_available'].includes(n.type)).length === 0 ? (
                   <div className="p-8 text-center opacity-40">
-                    <p className="text-xs font-bold italic">No notifications yet</p>
+                    <p className="text-xs font-bold italic">No alerts for you yet</p>
                   </div>
                 ) : (
-                  notifications.map((notif) => (
-                    <div
-                      key={notif._id}
-                      onClick={() => !notif.isRead && markNotificationAsRead(notif._id)}
-                      className={`flex items-start space-x-4 px-4 py-4 hover:bg-brand-hover-tint transition-colors cursor-pointer relative group ${!notif.isRead ? 'bg-brand-primary/[0.03]' : ''}`}
-                    >
-                      <div className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${!notif.isRead ? 'bg-brand-primary shadow-[0_0_8px_rgba(37,99,235,0.4)]' : 'bg-transparent'}`} />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between mb-0.5">
-                          <p className={`text-xs font-black uppercase tracking-wider ${theme === 'dark' ? 'text-white' : 'text-slate-800'}`}>
-                            {notif.type?.replace('_', ' ') || 'System Alert'}
+                  notifications
+                    .filter(n => ['refill', 'order', 'prescription', 'medicine_available'].includes(n.type))
+                    .sort((a, b) => (a.type === 'refill' ? -1 : 1)) // Prioritize refill alerts at top
+                    .map((notif) => (
+                      <div
+                        key={notif._id}
+                        onClick={() => !notif.isRead && markNotificationAsRead(notif._id)}
+                        className={`flex items-start space-x-4 px-4 py-4 hover:bg-brand-hover-tint transition-colors cursor-pointer relative group ${!notif.isRead ? 'bg-brand-primary/[0.03]' : ''}`}
+                      >
+                        <div className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${!notif.isRead ? 'bg-brand-primary shadow-[0_0_8px_rgba(37,99,235,0.4)]' : 'bg-transparent'}`} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between mb-0.5">
+                            <p className={`text-xs font-black uppercase tracking-wider ${theme === 'dark' ? 'text-white' : 'text-slate-800'}`}>
+                              {notif.type?.replace('_', ' ') || 'System Alert'}
+                            </p>
+                            <span className="text-[9px] font-bold opacity-30 whitespace-nowrap ml-2">
+                              {new Date(notif.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <p className={`text-[11px] font-medium leading-relaxed ${!notif.isRead ? 'text-brand-text-primary' : 'text-brand-text-secondary'} line-clamp-2`}>
+                            {notif.message}
                           </p>
-                          <span className="text-[9px] font-bold opacity-30 whitespace-nowrap ml-2">
-                            {new Date(notif.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
                         </div>
-                        <p className={`text-[11px] font-medium leading-relaxed ${!notif.isRead ? 'text-brand-text-primary' : 'text-brand-text-secondary'} line-clamp-2`}>
-                          {notif.message}
-                        </p>
                       </div>
-                    </div>
-                  ))
+                    ))
                 )}
               </div>
 

@@ -509,26 +509,38 @@ async function getMonthlyRevenueTrend() {
 }
 
 async function getOrderStatusDistribution() {
-    const statuses = ['Placed', 'CONFIRMED', 'IN_WAREHOUSE', 'SHIPPED', 'FULFILLED', 'REJECTED'];
-    const counts = await Promise.all(statuses.map(async (s) => {
-        if (s === 'REJECTED') {
-            return await Order.countDocuments({ status: { $in: ['REJECTED', 'Cancelled'] } });
+    const allowedStatuses = ['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
+
+    // Fetch all relevant orders to process grouping manually for accuracy
+    const orders = await Order.find().select('status');
+
+    const counts = {};
+    allowedStatuses.forEach(s => counts[s] = 0);
+
+    orders.forEach(order => {
+        let status = order.status || 'PENDING';
+        if (status === 'REJECTED' || status === 'Cancelled') status = 'CANCELLED';
+        if (allowedStatuses.includes(status)) {
+            counts[status]++;
         }
-        return await Order.countDocuments({ status: s });
-    }));
+    });
+
+    const filteredResults = allowedStatuses
+        .filter(s => counts[s] > 0)
+        .map(s => ({ name: s, value: counts[s] }));
 
     return {
         role: 'agent',
         type: 'chart',
         data: {
-            chartTitle: "Order Status Distribution",
-            chartType: "Pie Chart",
-            labels: statuses,
+            chartTitle: "Order Status Breakdown",
+            chartType: "Bar Chart",
+            labels: filteredResults.map(r => r.name),
             datasets: [{
                 label: "Order Count",
-                data: counts
+                data: filteredResults.map(r => r.value)
             }],
-            insights: "Current delivery efficiency is visualized. Business Recommendation: Monitor 'Cancelled' orders closely; if they exceed 5%, investigate payment gateway failures or stock-out issues."
+            insights: `Analysis of ${orders.length} orders across ${filteredResults.length} active delivery stages.`
         }
     };
 }

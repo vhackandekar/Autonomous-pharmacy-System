@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
 import { useTheme } from '../context/ThemeContext';
-import { ChevronDown, X, Check, Bell } from 'lucide-react';
+import { ChevronDown, X, Check, Bell, Pill } from 'lucide-react';
+import { useChat } from '../context/ChatContext';
 
 export const Button = ({ children, variant = 'primary', size = 'md', className = '', loading = false, disabled = false, ...props }) => {
   const { theme } = useTheme();
@@ -142,9 +144,26 @@ export const Toast = ({ message, type = 'success', visible, onClose }) => {
   );
 };
 
-export const ChatBubble = ({ role, content, timestamp }) => {
+
+
+export const ChatBubble = ({ role, content, metadata, timestamp }) => {
   const isUser = role === 'user';
   const { theme } = useTheme();
+  const { addMessageToActive } = useChat() || {};
+  const [selectedDosage, setSelectedDosage] = useState('');
+  const [isSubmitted, setIsSubmitted] = useState(false);
+
+  const handleDosageSubmit = () => {
+    if (selectedDosage && addMessageToActive) {
+      setIsSubmitted(true);
+      addMessageToActive({
+        id: Date.now(),
+        role: 'user',
+        content: `My dosage is: ${selectedDosage}`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      });
+    }
+  };
 
   return (
     <div className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'} mb-6 group animate-in slide-in-from-bottom-2 duration-500`}>
@@ -157,6 +176,53 @@ export const ChatBubble = ({ role, content, timestamp }) => {
       `}>
         <div className="flex flex-col space-y-1">
           <p className="text-sm font-semibold leading-relaxed whitespace-pre-wrap">{content}</p>
+
+          {/* Dosage Dropdown for AI messages */}
+          {!isUser && metadata?.requiresDosage && metadata?.dosageOptions && !isSubmitted && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-4 p-4 rounded-2xl bg-brand-primary/5 border border-brand-primary/10 space-y-3"
+            >
+              <div className="flex items-center space-x-2 text-brand-primary">
+                <Pill size={16} />
+                <span className="text-[10px] font-black uppercase tracking-widest">Select Clinical Dosage</span>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2">
+                <div className="relative flex-1">
+                  <select
+                    className={`w-full appearance-none px-4 py-2.5 rounded-xl text-xs font-bold border border-brand-border-color bg-brand-card text-brand-text-primary focus:ring-2 focus:ring-brand-primary/20 outline-none pr-10`}
+                    value={selectedDosage}
+                    onChange={(e) => setSelectedDosage(e.target.value)}
+                  >
+                    <option value="">Choose dosage...</option>
+                    {metadata.dosageOptions.map((opt, i) => (
+                      <option key={i} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none opacity-40" />
+                </div>
+                <button
+                  disabled={!selectedDosage}
+                  onClick={handleDosageSubmit}
+                  className="px-6 py-2.5 bg-brand-primary text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-brand-secondary disabled:opacity-50 transition-all active:scale-95 shadow-md shadow-brand-primary/10 flex items-center justify-center space-x-2"
+                >
+                  <Check size={14} />
+                  <span>Apply</span>
+                </button>
+              </div>
+              <p className="text-[9px] opacity-40 font-bold italic">* Required for medical precision and safety</p>
+            </motion.div>
+          )}
+
+          {isSubmitted && (
+            <div className="mt-2 flex items-center space-x-2 text-brand-success text-[10px] font-bold">
+              <Check size={12} />
+              <span>Dosage Confirmed</span>
+            </div>
+          )}
+
           <div className={`flex items-center space-x-2 mt-2 pt-2 border-t border-white/10 ${isUser ? 'justify-end' : 'justify-start'}`}>
             <span className={`text-[10px] font-black uppercase tracking-widest opacity-40`}>
               {timestamp || 'Just now'}

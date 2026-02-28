@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const BASE_URL = 'http://localhost:5000/api';
+const BASE_URL = import.meta.env.VITE_API_BASE || 'http://localhost:5000/api';
 
 const api = axios.create({ baseURL: BASE_URL });
 
@@ -39,12 +39,14 @@ api.interceptors.response.use(
 export const login = (data) => api.post('/auth/login', data);
 export const register = (data) => api.post('/auth/register', data);
 export const getProfile = () => api.get('/auth/profile');
+export const updateProfile = (data) => api.put('/auth/profile', data);
 
 // DASHBOARD
 export const getDashboardStats = () => api.get('/admin/dashboard');
 export const getAnalytics = () => api.get('/admin/analytics');
 export const getActivity = () => api.get('/admin/activity');
 export const getInventoryDetails = () => api.get('/admin/inventory');
+
 
 // MEDICINES
 export const getMedicines = () => api.get('/medicine');
@@ -62,6 +64,9 @@ export const getAgentLogs = () => api.get('/agent/logs');
 
 // NOTIFICATIONS
 export const getNotifications = (userId) => api.get(`/notify/user/${userId}`);
+export const getAdminNotifications = () => api.get('/notify/admin');
+export const markAllNotificationsRead = (data) => api.post('/notify/mark-all-read', data);
+export const markNotificationRead = (id) => api.put(`/notify/${id}/read`);
 
 // PRESCRIPTIONS
 export const validatePrescription = (medicineId, userId) =>
@@ -71,6 +76,8 @@ export const uploadPrescription = (file) => {
   formData.append('prescription', file);
   return api.post('/prescription/upload', formData);
 };
+export const getPrescriptions = () => api.get('/prescription/all');
+export const reviewPrescription = (id, status, reason) => api.put(`/prescription/review/${id}`, { status, reason });
 
 // PAYMENT
 export const processPayment = (data) => api.post('/payment/process', data);
@@ -80,7 +87,6 @@ export const createCart = (userId) => api.post('/cart/create', { userId });
 export const addToCart = (data) => api.post('/cart/add', data);
 
 // WEBHOOK
-export const triggerRefillAlert = (data) => api.post('/webhook/refill-alert', data);
 export const triggerOrderWebhook = (data) => api.post('/webhook/order', data);
 
 // VENDORS

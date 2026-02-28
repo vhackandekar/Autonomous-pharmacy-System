@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const cron = require('node-cron');
+const { initCronJobs } = require('./utils/cronJobs');
 const PredictiveRefillAgent = require('./Agents/PredictiveRefillAgent');
 const User = require('./schema/User');
 
@@ -22,6 +23,8 @@ const notificationRoutes = require('./routes/notificationRoutes');
 const webhookRoutes = require('./routes/webhookRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const vendorRoutes = require('./routes/vendorRoutes');
+const paymentRoutes = require('./routes/paymentRoutes');
+const stockAlertRoutes = require('./routes/stockAlertRoutes');
 
 //midlewares
 app.use(express.json());
@@ -48,6 +51,8 @@ app.use('/api/notify', notificationRoutes);
 app.use('/webhook/n8n', webhookRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/vendor', vendorRoutes);
+app.use('/api/payment', paymentRoutes);
+app.use('/api/stock-alert', stockAlertRoutes);
 
 const port = process.env.PORT || 5000;
 //database connection – normalize URL (trim + strip quotes so .env parsing is robust)
@@ -96,6 +101,9 @@ const main = async () => {
             socket.on('disconnect', () => { console.log('socket disconnected:', socket.id); });
         });
 
+        // Initialize Automated Background Tasks
+        initCronJobs();
+
         server.listen(port, () => {
             console.log(`🚀 Server and Socket.IO running on port ${port}`);
         });
@@ -107,17 +115,3 @@ const main = async () => {
 };
 
 main();
-
-// FR-9: Predictive Refill Cron Job (Runs every day at Midnight)
-cron.schedule('0 0 * * *', async () => {
-    console.log('Running daily predictive refill analysis...');
-    try {
-        const users = await User.find({ role: 'USER' });
-        for (const user of users) {
-            await PredictiveRefillAgent.analyzeAndAlert(user._id);
-        }
-        console.log('Daily predictive refill analysis completed.');
-    } catch (error) {
-        console.error('Cron Job Error:', error);
-    }
-});

@@ -10,6 +10,7 @@ router.put('/orders/:id', verifyToken, isAdmin, adminController.updateOrderStatu
 router.get('/analytics', verifyToken, isAdmin, adminController.getAnalytics);
 router.get('/activity', verifyToken, isAdmin, adminController.getActivity);
 router.get('/inventory', verifyToken, isAdmin, adminController.getInventoryDetails);
+router.get('/refill-alerts', verifyToken, isAdmin, adminController.getRefillAlerts);
 router.post('/refill-trigger', verifyToken, isAdmin, adminController.triggerRefillAnalysis);
 router.post('/ai-chat', verifyToken, isAdmin, aiAdminController.processAIChat);
 

@@ -3,6 +3,9 @@ const Notification = require('../schema/Notification');
 exports.sendRefillNotification = async (req, res) => {
     try {
         const { userId, message } = req.body;
+        if (!userId || !message) {
+            return res.status(400).json({ error: 'userId and message are required' });
+        }
         const notification = new Notification({ userId, type: 'refill', message });
         await notification.save();
         try {

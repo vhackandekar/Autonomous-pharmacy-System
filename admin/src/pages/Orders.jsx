@@ -11,11 +11,11 @@ const mockOrders = [
   { _id: '2', id: 'ORD-8893', userId: { name: 'Michael Chen' }, items: [{ medicineId: { name: 'Metformin' }, quantity: 1 }], totalAmount: 15000, status: 'PROCESSING', orderDate: new Date('2024-01-15') },
   { _id: '3', id: 'ORD-8894', userId: { name: 'Emily Davis' }, items: [{ medicineId: { name: 'Paracetamol' }, quantity: 4 }], totalAmount: 6000, status: 'SHIPPED', orderDate: new Date('2024-01-14') },
   { _id: '4', id: 'ORD-8895', userId: { name: 'David Wilson' }, items: [{ medicineId: { name: 'Omeprazole' }, quantity: 1 }], totalAmount: 3200, status: 'DELIVERED', orderDate: new Date('2024-01-13') },
-  { _id: '5', id: 'ORD-8896', userId: { name: 'Jessica Brown' }, items: [{ medicineId: { name: 'Lisinopril' }, quantity: 3 }], totalAmount: 36000, status: 'CONFIRMED', orderDate: new Date('2024-01-15') },
+  { _id: '5', id: 'ORD-8896', userId: { name: 'Jessica Brown' }, items: [{ medicineId: { name: 'Lisinopril' }, quantity: 3 }], totalAmount: 36000, status: 'PENDING', orderDate: new Date('2024-01-15') },
   { _id: '6', id: 'ORD-8897', userId: { name: 'Raj Patel' }, items: [{ medicineId: { name: 'Amoxicillin' }, quantity: 2 }], totalAmount: 17000, status: 'REJECTED', orderDate: new Date('2024-01-15') },
 ];
 
-const ORDER_STATUSES = ['CONFIRMED', 'IN_WAREHOUSE', 'SHIPPED', 'FULFILLED', 'REJECTED'];
+const ORDER_STATUSES = ['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
 
 const normalizeStatus = (s) => (s === 'Cancelled' || s === 'REJECTED') ? 'REJECTED' : s;
 
@@ -28,6 +28,9 @@ export default function Orders() {
   const [orders, setOrders] = useState([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+
+  // Normalize REJECTED to CANCELLED for the UI filters/stats
+  const normalizeStatus = (s) => (s === 'REJECTED' ? 'CANCELLED' : s);
   const [selected, setSelected] = useState(null);
   const [updatingId, setUpdatingId] = useState(null);
   const [page, setPage] = useState(1);
@@ -55,7 +58,8 @@ export default function Orders() {
 
   // Socket.IO real-time updates (join admin room)
   useEffect(() => {
-    const socket = io(import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000');
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+    const socket = io(backendUrl);
     socket.emit('join', { role: 'ADMIN' });
 
     socket.on('order_created', (order) => {
@@ -72,10 +76,7 @@ export default function Orders() {
       });
     });
 
-    socket.on('refill_alert_admin', (notification) => {
-      // Keep admin refreshed: refetch polling data to update stats
-      refetch && refetch();
-    });
+
 
     return () => { socket.disconnect(); };
   }, [refetch]);
@@ -113,10 +114,12 @@ export default function Orders() {
       </div>
 
       {/* Stats Row */}
-      <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(5,1fr)', marginBottom: 24 }}>
+      <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', marginBottom: 24 }}>
         {['All', ...ORDER_STATUSES].map(s => {
           const label = s === 'All' ? 'All' : s.replace(/_/g, ' ').toLowerCase().replace(/(^|\s)\S/g, t => t.toUpperCase());
-          const count = s === 'All' ? orders.length : orders.filter(o => o.status === s).length;
+          const count = s === 'All'
+            ? orders.length
+            : orders.filter(o => normalizeStatus(o.status) === s).length;
           return (
             <div
               key={s}

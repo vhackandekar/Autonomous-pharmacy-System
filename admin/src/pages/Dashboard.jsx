@@ -17,13 +17,13 @@ import { useAuth } from '../context/AuthContext';
 
 
 const statusClass = (s) => {
-  const normalized = (s === 'Cancelled' || s === 'REJECTED') ? 'REJECTED' : s;
+  const normalized = (s === 'Cancelled' || s === 'REJECTED') ? 'CANCELLED' : s;
   const m = {
-    CONFIRMED: 'confirmed',
-    REJECTED: 'rejected',
-    IN_WAREHOUSE: 'processing',
+    PENDING: 'confirmed',
+    CANCELLED: 'rejected',
+    PROCESSING: 'processing',
     SHIPPED: 'shipped',
-    FULFILLED: 'delivered'
+    DELIVERED: 'delivered'
   };
   return m[normalized] || 'pending';
 };
@@ -74,148 +74,126 @@ export default function Dashboard() {
   const currentChartColors = chartColors[theme];
 
 
-  useEffect(() => {
-    if (!token) {
-      console.warn('⚠️ Token not available yet, waiting...');
-      return;
-    }
 
-    const fetchDashboardData = async () => {
-      try {
-        setLoading(true);
-        console.log('🔄 Fetching dashboard data with token:', token?.slice(0, 20) + '...');
+  const fetchDashboardData = async (isRefresh = false) => {
+    try {
+      if (!isRefresh) setLoading(true);
+      const [statsRes, ordersRes, medicinesRes] = await Promise.all([
+        getDashboardStats(),
+        getAllOrders(),
+        getMedicines(),
+      ]);
 
-        const [statsRes, ordersRes, medicinesRes] = await Promise.all([
-          getDashboardStats(),
-          getAllOrders(),
-          getMedicines(),
-        ]);
+      setStats(statsRes.data);
+      const allOrders = ordersRes.data || [];
+      const medicines = medicinesRes.data || [];
+      setLowStockMedicines(medicines.filter(m => m.stock < 20));
 
-        console.log('✅ Dashboard data fetched successfully');
-        setStats(statsRes.data);
+      const weeklyMap = {};
+      const last7Days = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const dayName = d.toLocaleDateString('en-IN', { weekday: 'short' });
+        last7Days.push(dayName);
+        weeklyMap[dayName] = { day: dayName, sales: 0, orders: 0 };
+      }
 
-        const allOrders = ordersRes.data || [];
-
-        const lowStock = medicinesRes.data.filter(m => m.stock < 20);
-        setLowStockMedicines(lowStock);
-
-        // Initialize all 7 days of the week to ensure a full chart line
-        const weeklyMap = {};
-        const last7Days = [];
-        for (let i = 6; i >= 0; i--) {
-          const d = new Date();
-          d.setDate(d.getDate() - i);
-          const dayName = d.toLocaleDateString('en-IN', { weekday: 'short' });
-          last7Days.push(dayName);
-          weeklyMap[dayName] = { day: dayName, sales: 0, orders: 0 };
+      allOrders.forEach(order => {
+        const oDate = order.orderDate || order.createdAt;
+        if (!oDate) return;
+        const dateObj = new Date(oDate);
+        if (isNaN(dateObj.getTime())) return;
+        const day = dateObj.toLocaleDateString('en-IN', { weekday: 'short' });
+        if (weeklyMap[day]) {
+          weeklyMap[day].sales += order.totalAmount || 0;
+          weeklyMap[day].orders += 1;
         }
+      });
+      setSalesData(last7Days.map(d => weeklyMap[d]));
 
-        ordersRes.data.forEach(order => {
-          const oDate = order.orderDate || order.createdAt;
-          if (!oDate) return;
-          const dateObj = new Date(oDate);
-          if (isNaN(dateObj.getTime())) return;
-          const day = dateObj.toLocaleDateString('en-IN', { weekday: 'short' });
-          if (weeklyMap[day]) {
-            weeklyMap[day].sales += order.totalAmount || 0;
-            weeklyMap[day].orders += 1;
-          }
-        });
+      const catMap = {};
+      medicines.forEach(med => {
+        const cat = med.prescriptionRequired ? 'Prescription' : 'OTC';
+        catMap[cat] = (catMap[cat] || 0) + 1;
+      });
+      setCategoryData(Object.keys(catMap).map(name => ({ name, value: catMap[name] })));
 
-        setSalesData(last7Days.map(d => weeklyMap[d]));
+      const allowedStatuses = ['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
+      const statusMap = allowedStatuses.reduce((acc, status) => ({ ...acc, [status]: 0 }), {});
 
-        // NEW: Process Category Distribution
-        const catMap = {};
-        medicinesRes.data.forEach(med => {
-          const cat = med.prescriptionRequired ? 'Prescription' : 'OTC';
-          catMap[cat] = (catMap[cat] || 0) + 1;
-        });
-        setCategoryData(() => Object.keys(catMap).map(name => ({ name, value: catMap[name] })));
-
-        // NEW: Process Order Status
-        const statusMap = {};
-        allOrders.forEach(order => {
-          const status = (order.status === 'Cancelled' || order.status === 'REJECTED') ? 'REJECTED' : order.status;
-          statusMap[status] = (statusMap[status] || 0) + 1;
-        });
-        setStatusData(() => Object.keys(statusMap).map(name => ({ name, value: statusMap[name] })));
-
-        // NEW: Monthly Profit Trend (Initialize last 6 months)
-        const profitMonthlyMap = {};
-        const monthsToShow = [];
-        for (let i = 5; i >= 0; i--) {
-          const d = new Date();
-          d.setMonth(d.getMonth() - i);
-          const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-          const monthDisplay = d.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
-          monthsToShow.push(monthKey);
-          profitMonthlyMap[monthKey] = { month: monthDisplay, profit: 0 };
+      allOrders.forEach(order => {
+        let status = order.status || 'PENDING';
+        if (status === 'Cancelled' || status === 'REJECTED') status = 'CANCELLED';
+        if (allowedStatuses.includes(status)) {
+          statusMap[status]++;
         }
+      });
 
-        ordersRes.data.forEach(order => {
-          const date = new Date(order.orderDate || order.createdAt);
-          if (isNaN(date.getTime())) return;
-          const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      const filteredStatusData = allowedStatuses
+        .filter(status => statusMap[status] > 0)
+        .map(name => ({ name, value: statusMap[name] }));
 
-          if (profitMonthlyMap[monthKey]) {
-            order.items.forEach(item => {
-              const price = item.medicineId?.price || 0;
-              const cost = item.medicineId?.costPrice || 0;
-              profitMonthlyMap[monthKey].profit += (price - cost) * item.quantity;
-            });
-          }
-        });
+      setStatusData(filteredStatusData);
 
-        setMonthlyProfitData(monthsToShow.map(key => profitMonthlyMap[key]));
+      const profitMonthlyMap = {};
+      const monthsToShow = [];
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date();
+        d.setMonth(d.getMonth() - i);
+        const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const monthDisplay = d.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
+        monthsToShow.push(monthKey);
+        profitMonthlyMap[monthKey] = { month: monthDisplay, profit: 0 };
+      }
 
-        const activeOrders = allOrders.filter(o => o.status !== 'Cancelled' && o.status !== 'REJECTED');
-
-        // Calculate totals for stats cards from active orders
-        const revenue = activeOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
-        const profit = activeOrders.reduce((sum, order) => {
-          return sum + (order.items?.reduce((pSum, item) => {
+      allOrders.forEach(order => {
+        const date = new Date(order.orderDate || order.createdAt);
+        if (isNaN(date.getTime())) return;
+        const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        if (profitMonthlyMap[monthKey]) {
+          order.items?.forEach(item => {
             const price = item.medicineId?.price || 0;
             const cost = item.medicineId?.costPrice || 0;
-            return pSum + ((price - cost) * item.quantity);
-          }, 0) || 0);
-        }, 0);
+            profitMonthlyMap[monthKey].profit += (price - cost) * (item.quantity || 0);
+          });
+        }
+      });
+      setMonthlyProfitData(monthsToShow.map(key => profitMonthlyMap[key]));
 
-        setStats(prev => ({ ...prev, totalSales: revenue, totalProfit: profit }));
+      const activeOrders = allOrders.filter(o => o.status !== 'Cancelled' && o.status !== 'REJECTED');
+      const revenue = activeOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+      const profit = activeOrders.reduce((sum, order) => {
+        return sum + (order.items?.reduce((pSum, item) => {
+          const price = item.medicineId?.price || 0;
+          const cost = item.medicineId?.costPrice || 0;
+          return pSum + ((price - cost) * (item.quantity || 0));
+        }, 0) || 0);
+      }, 0);
+      setStats(prev => ({ ...prev, totalSales: revenue, totalProfit: profit }));
+    } catch (error) {
+      console.error("Dashboard fetch error:", error);
+    } finally {
+      if (!isRefresh) setLoading(false);
+    }
+  };
 
-      } catch (error) {
-        console.error("Dashboard fetch error:", error);
-        toast.error("Failed to load dashboard data");
-      } finally {
-        setLoading(false);
-      }
-    };
+  useEffect(() => {
+    if (token) fetchDashboardData();
+  }, [token]);
 
-    fetchDashboardData();
-  }, [token]); // Re-run when token becomes available
 
-  // Socket: refresh dashboard when orders change elsewhere
+  // Socket: refresh dashboard charts in real-time
   useEffect(() => {
     const socket = io(import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000');
     socket.emit('join', { role: 'ADMIN' });
 
-    const refresh = async () => {
-      try {
-        const [statsRes, ordersRes, medicinesRes] = await Promise.all([
-          getDashboardStats(),
-          getAllOrders(),
-          getMedicines(),
-        ]);
-        setStats(statsRes.data);
-        const lowStock = medicinesRes.data.filter(m => m.stock < 20);
-        setLowStockMedicines(lowStock);
-      } catch (err) {
-        console.error('Socket refresh failed', err);
-      }
-    };
+    const refresh = () => fetchDashboardData(true);
 
     socket.on('order_created', refresh);
     socket.on('order_updated_admin', refresh);
     socket.on('order_updated', refresh);
+    socket.on('stock_alert', refresh);
 
     return () => { socket.disconnect(); };
   }, []);
@@ -278,7 +256,25 @@ export default function Dashboard() {
           <div className="stat-value">{lowStockMedicines.length}</div>
           <div className="stat-label">Low Stock Items</div>
         </div>
-      </div>
+
+        <div className="stat-card">
+          <div className="stat-card-header">
+            <div className="stat-icon blue"><ShoppingCart size={20} /></div>
+          </div>
+          <div className="stat-value">{stats?.processingCount ?? stats?.pendingOrders ?? 0}</div>
+          <div className="stat-label">Orders Processing</div>
+        </div>
+
+        <div className="stat-card">
+          <div className="stat-card-header">
+            <div className="stat-icon purple"><Truck size={20} /></div>
+          </div>
+          <div className="stat-value">
+            {stats?.shippedCount ?? 0}
+          </div>
+          <div className="stat-label">Active Shipments</div>
+        </div>
+      </div >
 
       <div className="content-grid">
 
@@ -421,10 +417,7 @@ export default function Dashboard() {
 
         </div>
 
-
-
-
       </div>
-    </div>
+    </div >
   );
 }

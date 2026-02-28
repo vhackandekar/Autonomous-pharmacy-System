@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ShoppingCart, Trash2, Plus, Minus, ArrowRight, Package, Sparkles } from 'lucide-react';
+import { ShoppingCart, Trash2, Plus, Minus, ArrowRight, Package, Sparkles, AlertCircle, ChevronRight } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useOrders } from '../context/OrderContext';
 import { Button, Badge } from '../Component/UI';
@@ -56,6 +56,29 @@ const CartPage = () => {
         </div>
       </motion.div>
 
+      {/* Prescription Warning Banner */}
+      {cart.some(item => item.prescriptionRequired && item.prescriptionStatus !== 'VERIFIED') && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="mb-8 p-6 rounded-[2rem] bg-amber-500/10 border border-amber-500/20 flex items-center justify-between gap-4"
+        >
+          <div className="flex items-center gap-4">
+            <div className="p-3 bg-amber-500/20 rounded-2xl text-amber-500">
+              <AlertCircle size={24} />
+            </div>
+            <div>
+              <h4 className="font-black text-sm text-brand-text-primary uppercase tracking-tight">Prescription Verification Required</h4>
+              <p className="text-xs font-medium opacity-60 text-brand-text-secondary">Some items in your cart require a valid prescription before we can process your order.</p>
+            </div>
+          </div>
+          <Button variant="secondary" size="sm" onClick={() => navigate('/prescriptions')} className="whitespace-nowrap">
+            Manage Prescriptions
+            <ChevronRight size={16} className="ml-1" />
+          </Button>
+        </motion.div>
+      )}
+
       {cart.length === 0 ? (
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
@@ -105,6 +128,19 @@ const CartPage = () => {
                       ₹{((item.price || 0) * item.qty).toFixed(2)}
                       <span className="text-xs opacity-40 font-medium ml-1">(₹{(item.price || 0).toFixed(2)} each)</span>
                     </p>
+                    {item.prescriptionRequired && (
+                      <div className="mt-2 flex items-center gap-2">
+                        {item.prescriptionStatus === 'VERIFIED' ? (
+                          <Badge variant="success" size="sm" className="px-2 py-0.5 text-[10px]">✅ Verified</Badge>
+                        ) : item.prescriptionStatus === 'PENDING' ? (
+                          <Badge variant="warning" size="sm" className="px-2 py-0.5 text-[10px]">🟡 Verifying...</Badge>
+                        ) : item.prescriptionStatus === 'REJECTED' ? (
+                          <Badge variant="danger" size="sm" className="px-2 py-0.5 text-[10px] cursor-pointer" onClick={() => navigate('/prescriptions')}>❌ Action Required</Badge>
+                        ) : (
+                          <Badge variant="secondary" size="sm" className="px-2 py-0.5 text-[10px] cursor-pointer" onClick={() => navigate('/prescriptions')}>📄 Prescription Needed</Badge>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Quantity Controls */}
