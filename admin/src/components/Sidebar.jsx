@@ -11,6 +11,7 @@ const navItems = [
   { to: '/orders', icon: ShoppingCart, label: 'Orders', badge: '12', badgeColor: 'green' },
   { to: '/ai-intelligence', icon: Bot, label: 'Admin AI' },
   { to: '/prescriptions', icon: FileText, label: 'Prescriptions' },
+  { to: '/refill-alerts', icon: Bell, label: 'Refill Alerts' },
 
   { to: '/manage-vendors', icon: Users, label: 'Manage Vendors' },
   { to: '/settings', icon: Settings, label: 'Settings' },

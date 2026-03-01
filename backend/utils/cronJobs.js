@@ -10,7 +10,7 @@ const initCronJobs = () => {
     console.log('🚀 [SYSTEM] Initializing Automated Clinical Intelligence...');
 
     // 1. DAILY REFILL ANALYSIS (Runs every day at 6:47 AM)
-    cron.schedule('* * * * *', async () => {
+    cron.schedule('0 9 * * *', async () => {
         console.log('⏰ [SYSTEM] Running Automated Daily Refill Analysis...');
         try {
             const users = await User.find({ role: 'USER' });

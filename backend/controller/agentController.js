@@ -29,6 +29,13 @@ exports.chatUpload = async (req, res) => {
 
     console.log(`Chat Upload: File received: ${file.originalname}, Path: ${file.path}`);
 
+    const langfuse = require('../utils/langfuseClient');
+    const trace = langfuse ? langfuse.trace({
+        name: "Prescription-Upload-Flow",
+        userId: userId.toString(),
+        metadata: { filename: file.originalname }
+    }) : null;
+
     try {
         // Get cart and candidate medicines
         const cart = await Cart.findOne({ userId, status: 'PENDING' }).populate('items.medicineId');
@@ -44,6 +51,7 @@ exports.chatUpload = async (req, res) => {
             if (file && file.path) {
                 fs.unlink(file.path, (err) => { if (err) console.error('File cleanup error:', err); });
             }
+            if (trace) trace.update({ output: "No candidates found" });
             return res.json({
                 agentResponse: {
                     answer: "I couldn't find any medicines in our system that require a prescription. Please make sure you've added items to your cart first, or mention the medicine name.",
@@ -55,13 +63,18 @@ exports.chatUpload = async (req, res) => {
         // Perform OCR Analysis
         let analysis;
         try {
-            analysis = await PrescriptionAgent.analyzePrescription(file.path, userId);
+            const analysisSpan = trace ? trace.span({ name: "Perform-OCR-Analysis" }) : null;
+            analysis = await PrescriptionAgent.analyzePrescription(file.path, userId, analysisSpan);
             console.log('OCR Complete:', { status: analysis.status, count: analysis.detectedMedicines.length });
+            if (analysisSpan) analysisSpan.end({ output: analysis });
         } catch (ocrErr) {
             console.error("OCR Failed:", ocrErr);
             if (file && file.path) fs.unlink(file.path, () => { });
+            if (trace) trace.update({ output: ocrErr.message, level: "ERROR" });
             return res.status(500).json({ error: "OCR Analysis failed" });
         }
+
+        const decisionSpan = trace ? trace.span({ name: "Medicine-Matching-Decision", input: { detected: analysis.detectedMedicines } }) : null;
 
         // Find the specific target medicine (prioritizing user cart/intent)
         let targetMedicine = null;
@@ -81,8 +94,11 @@ exports.chatUpload = async (req, res) => {
             targetMedicine = candidates[0];
         }
 
+        if (decisionSpan) decisionSpan.end({ output: { matched: targetMedicine?.name || 'none' } });
+
         if (!targetMedicine) {
             if (file && file.path) fs.unlink(file.path, () => { });
+            if (trace) trace.update({ output: "No target medicine matched" });
             return res.json({
                 agentResponse: {
                     answer: "I couldn't identify a matching medicine in our system from this prescription. Could you please specify which medicine this is for?",
@@ -94,9 +110,11 @@ exports.chatUpload = async (req, res) => {
         // Logic Guards
         if (!targetMedicine.prescriptionRequired) {
             if (file && file.path) fs.unlink(file.path, () => { });
+            const responseText = `Actually, ${targetMedicine.name} doesn't require a prescription! You can buy it directly.`;
+            if (trace) trace.update({ output: responseText, metadata: { status: 'OTC_REDIRECT' } });
             return res.json({
                 agentResponse: {
-                    answer: `Actually, ${targetMedicine.name} doesn't require a prescription! You can buy it directly.`,
+                    answer: responseText,
                     intent: 'ADD_TO_CART',
                     items: [{ medicine_name: targetMedicine.name, quantity: 1 }]
                 }
@@ -105,9 +123,11 @@ exports.chatUpload = async (req, res) => {
 
         if (targetMedicine.stock <= 0) {
             if (file && file.path) fs.unlink(file.path, () => { });
+            const responseText = `I've found ${targetMedicine.name} on the prescription, but it's currently out of stock.`;
+            if (trace) trace.update({ output: responseText, metadata: { status: 'OUT_OF_STOCK' } });
             return res.json({
                 agentResponse: {
-                    answer: `I've found ${targetMedicine.name} on the prescription, but it's currently out of stock.`,
+                    answer: responseText,
                     intent: 'FALLBACK'
                 }
             });
@@ -178,6 +198,8 @@ exports.chatUpload = async (req, res) => {
             // Not critical, continue
         }
 
+        if (trace) trace.update({ output: responseText });
+
         res.json({
             agentResponse: {
                 answer: responseText,
@@ -193,6 +215,7 @@ exports.chatUpload = async (req, res) => {
         if (file && file.path) {
             fs.unlink(file.path, (err) => { if (err) console.error('File cleanup error:', err); });
         }
+        if (trace) trace.update({ output: error.message, level: "ERROR" });
         res.status(500).json({
             error: "Failed to process prescription",
             message: error.message || "An unexpected error occurred"
@@ -256,7 +279,8 @@ exports.chat = async (req, res) => {
             userCart || { items: [] },
             user?.name || "User",
             trace,
-            sessionId
+            sessionId,
+            userLang
         );
 
         // --- STEP 2: Logic Handler based on Intent Decision ---
@@ -651,13 +675,6 @@ exports.chat = async (req, res) => {
             return res.json({ agentResponse: agentResult, workflowStatus: 'NOTIFY_STOCK_ADDED' });
         }
 
-        // --- STEP 4: Translation (English to Indic) ---
-        if (userLang.toLowerCase() !== 'english') {
-            console.log(`Translating AI response from English to ${userLang}...`);
-            const translatedAnswer = await ConversationalAgent.translateMessage(agentResult.answer, userLang, 'English');
-            agentResult.answer = translatedAnswer;
-        }
-
         // Create persistent log of the conversation
         await new AgentLog({
             userId,
@@ -668,6 +685,12 @@ exports.chat = async (req, res) => {
             workflowStatus: 'PROCESSED'
         }).save();
 
+        if (trace) {
+            trace.update({
+                output: agentResult.answer,
+                metadata: { intent: agentResult.intent, confidence: agentResult.confidence }
+            });
+        }
         if (langfuse) await langfuse.flushAsync();
         return res.json({ agentResponse: agentResult, workflowStatus: 'PROCESSED' });
 
@@ -683,10 +706,33 @@ exports.speechToText = async (req, res) => {
     const file = req.file;
     const { language } = req.body;
 
-    console.log(`[STT_DEBUG] Request Body:`, req.body);
-    console.log(`[STT_DEBUG] Language Received: [${language}]`);
+    if (!file) {
+        return res.status(400).json({ error: "No audio file uploaded" });
+    }
 
-    if (!file) return res.status(400).json({ error: "No audio file uploaded" });
+    const langMap = {
+        'hindi': 'hi-IN',
+        'marathi': 'mr-IN',
+        'bengali': 'bn-IN',
+        'tamil': 'ta-IN',
+        'telugu': 'te-IN',
+        'kannada': 'kn-IN',
+        'gujarati': 'gu-IN',
+        'malayalam': 'ml-IN',
+        'punjabi': 'pa-IN',
+        'odia': 'od-IN',
+        'english': 'en-IN'
+    };
+
+    const targetLang = language?.toLowerCase() || 'hindi';
+    const langCode = langMap[targetLang] || 'unknown';
+
+    const langfuse = require('../utils/langfuseClient');
+    const trace = langfuse ? langfuse.trace({
+        name: "Speech-To-Text-Service",
+        userId: req.user?.id?.toString(),
+        metadata: { language: targetLang, langCode }
+    }) : null;
 
     try {
         const sarvamKey = process.env.SPEECH_TO_TEXT_API || process.env.SARVAM_API_KEY;
@@ -696,31 +742,15 @@ exports.speechToText = async (req, res) => {
         const fs = require('fs');
         const axios = require('axios');
 
-        const langMap = {
-            'hindi': 'hi-IN',
-            'marathi': 'mr-IN',
-            'bengali': 'bn-IN',
-            'tamil': 'ta-IN',
-            'telugu': 'te-IN',
-            'kannada': 'kn-IN',
-            'gujarati': 'gu-IN',
-            'malayalam': 'ml-IN',
-            'punjabi': 'pa-IN',
-            'odia': 'od-IN',
-            'english': 'en-IN'
-        };
-
-        const targetLang = language?.toLowerCase() || 'hindi';
-        console.log(`[STT_DEBUG] Resolved targetLang: [${targetLang}]`);
-        const langCode = langMap[targetLang] || 'unknown';
-        console.log(`[STT_DEBUG] Final langCode for Sarvam: [${langCode}]`);
-
         const form = new FormData();
-        form.append('file', fs.createReadStream(file.path));
-        form.append('model', 'saaras:v1');
-        form.append('language_code', langCode);
+        form.append('language', language); // Field order: language first
+        form.append('file', fs.createReadStream(file.path), {
+            filename: file.originalname || 'audio.webm',
+            contentType: file.mimetype
+        });
+        form.append('model', 'saaras:v3');
 
-        console.log(`[STT_DEBUG] Transcribing audio in [${langCode}] with Sarvam: ${file.path}`);
+        console.log(`[STT_DEBUG] Transcribing audio with Sarvam (saaras:v3): ${file.path}`);
 
         const response = await axios.post('https://api.sarvam.ai/speech-to-text', form, {
             headers: {
@@ -729,15 +759,19 @@ exports.speechToText = async (req, res) => {
             }
         });
 
-        const transcript = response.data?.transcript || "";
+        const transcript = response.data?.transcript || response.data?.text || response.data?.transcription || "";
         console.log(`[STT_DEBUG] Transcript: ${transcript}`);
+
+        if (trace) trace.update({ output: transcript });
 
         // Cleanup: remove file after transcription
         fs.unlink(file.path, (err) => { if (err) console.error("STT cleanup error:", err); });
 
+        if (langfuse) await langfuse.flushAsync();
         res.json({ transcript });
     } catch (error) {
         console.error("STT Error:", error.response?.data || error.message);
+        if (trace) trace.update({ output: error.message, level: "ERROR" });
         if (file && file.path) fs.unlink(file.path, () => { });
         res.status(500).json({ error: "Failed to transcribe audio", details: error.message });
     }

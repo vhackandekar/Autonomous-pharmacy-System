@@ -3,6 +3,7 @@ const PurchaseOrder = require('../schema/PurchaseOrder');
 const Medicine = require('../schema/Medicine');
 const InventoryLog = require('../schema/InventoryLog');
 const { sendEmail } = require('../utils/emailService');
+const stockAlertController = require('./stockAlertController');
 
 exports.getVendors = async (req, res) => {
     try {
@@ -202,10 +203,17 @@ exports.receivePurchaseOrder = async (req, res) => {
         for (const item of po.items) {
             const medicine = await Medicine.findById(item.medicineId);
             if (medicine) {
+                const oldStock = medicine.stock;
                 medicine.stock += item.quantity;
                 medicine.lowStockNotified = false;
                 await medicine.save();
                 await new InventoryLog({ medicineId: item.medicineId, change: item.quantity, reason: 'RESTOCK' }).save();
+
+                // Trigger Back-in-Stock Notifications if stock was 0 but is now > 0
+                if (oldStock === 0 && medicine.stock > 0) {
+                    console.log(`[AVAILABILITY_PO] Stock for ${medicine.name} refilled via PO. Notifying users...`);
+                    await stockAlertController.notifyBackInStock(medicine._id);
+                }
             }
         }
 

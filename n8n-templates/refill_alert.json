@@ -1,35 +1,27 @@
 {
-    "name": "Predictive Refill Alert (Functional Twilio)",
     "nodes": [
         {
             "parameters": {
-                "httpMethod": "POST",
-                "path": "refill-alert",
-                "options": {}
-            },
-            "name": "Webhook Trigger",
-            "type": "n8n-nodes-base.webhook",
-            "typeVersion": 1,
-            "position": [
-                250,
-                300
-            ],
-            "webhookId": "refill-trigger-002"
-        },
-        {
-            "parameters": {
-                "operation": "toPhone",
-                "to": "={{ $node[\"Webhook Trigger\"].json[\"body\"][\"phone\"] }}",
-                "message": "=Hi! Your {{ $node[\"Webhook Trigger\"].json[\"body\"][\"medicineName\"] }} will run out in {{ $node[\"Webhook Trigger\"].json[\"body\"][\"daysLeft\"] }} days. Replenish now?",
+                "from": "+19794755673",
+                "to": "+91 92845 05942",
+                "message": "={{ $json.body.medicineName }} low. ~{{ $json.body.daysLeft }} days left. Refill?",
                 "options": {}
             },
             "name": "Twilio SMS",
             "type": "n8n-nodes-base.twilio",
             "typeVersion": 1,
             "position": [
-                600,
-                300
-            ]
+                960,
+                528
+            ],
+            "id": "08f0bad8-171f-432d-bac8-c4ddb593e6d9",
+            "alwaysOutputData": false,
+            "credentials": {
+                "twilioApi": {
+                    "id": "NvrGB21mfkm1k2ZJ",
+                    "name": "Twilio account"
+                }
+            }
         },
         {
             "parameters": {
@@ -39,13 +31,30 @@
             "type": "n8n-nodes-base.stickyNote",
             "typeVersion": 1,
             "position": [
-                220,
-                100
-            ]
+                576,
+                320
+            ],
+            "id": "b880ccf7-2061-4982-b50f-c6853da439a6"
+        },
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "refill-alert",
+                "options": {}
+            },
+            "name": "Webhook Trigger1",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                608,
+                528
+            ],
+            "webhookId": "refill-trigger-002",
+            "id": "de54f554-8b52-4afe-98b2-438745179228"
         }
     ],
     "connections": {
-        "Webhook Trigger": {
+        "Webhook Trigger1": {
             "main": [
                 [
                     {
@@ -56,5 +65,10 @@
                 ]
             ]
         }
+    },
+    "pinData": {},
+    "meta": {
+        "templateCredsSetupCompleted": true,
+        "instanceId": "e54da9ece0ee8b14c0f753298959c14e4e5c6df2f0e71ddb0cc588badf61813b"
     }
 }

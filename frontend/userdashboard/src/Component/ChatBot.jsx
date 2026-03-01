@@ -1,13 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Mic, Globe, User, Bot, Loader2, MoreVertical, X, Paperclip, FileText, Trash2 } from 'lucide-react';
 import { useChat } from '../context/ChatContext';
+import { useTheme } from '../context/ThemeContext';
 import api from '../services/api';
 
-const ChatBot = ({ theme = 'dark' }) => {
+const ChatBot = ({ theme: propTheme = 'dark' }) => {
     const { currentMessages: messages, addMessageToActive, isTyping, uploadFile } = useChat();
+    const { theme: contextTheme, language, setLanguage } = useTheme();
+    const theme = contextTheme || propTheme;
+
+    const translations = {
+        'English': { placeholder: 'Ask your healthcare assistant...', analyzing: 'Analyzing Voice...' },
+        'Hindi': { placeholder: 'अपने स्वास्थ्य सहायक से पूछें...', analyzing: 'आवाज़ का विश्लेषण...' },
+        'Marathi': { placeholder: 'तुमच्या आरोग्य सहाय्यकाला विचारा...', analyzing: 'आवाजाचे विश्लेषण सुरू आहे...' }
+    };
+    const t = translations[language] || translations['English'];
+
     const [inputValue, setInputValue] = useState('');
     const [isListening, setIsListening] = useState(false);
-    const [selectedLanguage, setSelectedLanguage] = useState('English');
+    // Removed local selectedLanguage state
     const [attachedFile, setAttachedFile] = useState(null);
     const [filePreview, setFilePreview] = useState(null);
     const messagesEndRef = useRef(null);
@@ -41,7 +52,7 @@ const ChatBot = ({ theme = 'dark' }) => {
             };
 
             mediaRecorder.current.onstop = async () => {
-                const audioBlob = new Blob(audioChunks.current, { type: 'audio/wav' });
+                const audioBlob = new Blob(audioChunks.current, { type: 'audio/webm' });
                 await uploadAudio(audioBlob);
                 stream.getTracks().forEach(track => track.stop());
             };
@@ -50,7 +61,6 @@ const ChatBot = ({ theme = 'dark' }) => {
             setIsListening(true);
         } catch (error) {
             console.error("Microphone access denied:", error);
-            alert("Please allow microphone access to use Speech-to-Text.");
         }
     };
 
@@ -63,8 +73,8 @@ const ChatBot = ({ theme = 'dark' }) => {
 
     const uploadAudio = async (blob) => {
         const formData = new FormData();
-        formData.append('language', selectedLanguage);
-        formData.append('audio', blob, 'voice.wav');
+        formData.append('language', language);
+        formData.append('audio', blob, 'voice.webm');
 
         try {
             const { data } = await api.post('/agent/stt', formData, {
@@ -131,7 +141,7 @@ const ChatBot = ({ theme = 'dark' }) => {
                 content: userText,
                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             };
-            addMessageToActive(userMessage, false, selectedLanguage);
+            addMessageToActive(userMessage, false, language);
         }
     };
 
@@ -181,7 +191,7 @@ const ChatBot = ({ theme = 'dark' }) => {
                 </header>
 
                 {/* Chat Messages Area */}
-                <main className={`flex-1 overflow-y-auto p-4 md:p-6 space-y-6 ${theme === 'dark' ? 'scrollbar-thin scrollbar-thumb-purple-500/20' : 'scrollbar-thin scrollbar-thumb-gray-200'} scrollbar-track-transparent`}>
+                <main className={`flex-1 overflow-y-auto p-4 md:p-6 space-y-6 z-0 ${theme === 'dark' ? 'scrollbar-thin scrollbar-thumb-purple-500/20' : 'scrollbar-thin scrollbar-thumb-gray-200'} scrollbar-track-transparent`}>
                     {messages.map((msg) => (
                         <div key={msg.id} className={`flex w-full ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-500`}>
                             <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -218,7 +228,7 @@ const ChatBot = ({ theme = 'dark' }) => {
                 </main>
 
                 {/* Input Section */}
-                <footer className={`z-10 p-4 md:p-6 transition-all duration-500 ${theme === 'dark' ? 'bg-[#141225] border-t border-purple-500/20' : 'bg-white border-t border-gray-200'}`}>
+                <footer className={`z-50 relative p-4 md:p-6 transition-all duration-500 ${theme === 'dark' ? 'bg-[#141225] border-t border-purple-500/20' : 'bg-white border-t border-gray-200'}`}>
                     <div className="max-w-4xl mx-auto">
 
                         {/* File Preview Area */}
@@ -263,20 +273,26 @@ const ChatBot = ({ theme = 'dark' }) => {
                             <div className="relative group">
                                 <button
                                     type="button"
-                                    className={`p-3 rounded-xl transition-all flex items-center border ${theme === 'dark' ? 'bg-[#1B1730] border border-purple-500/10 text-purple-400 hover:text-purple-300 hover:border-purple-500/30' : 'bg-gray-50 border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-200'}`}
+                                    className={`p-3 rounded-xl transition-all flex items-center border ${theme === 'dark' ? 'bg-[#1B1730] border-purple-500/20 text-purple-400 hover:text-purple-300 hover:border-purple-500/30 active:scale-95 shadow-lg' : 'bg-gray-50 border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-200 active:scale-95 shadow-sm'}`}
                                     title="Switch Language"
                                 >
                                     <Globe size={20} />
                                 </button>
-                                <div className={`absolute bottom-full left-0 mb-2 invisible group-hover:visible transition-all rounded-lg p-2 min-w-[140px] shadow-2xl z-50 ${theme === 'dark' ? 'bg-[#1B1730] border border-purple-500/20' : 'bg-white border border-gray-200'}`}>
+                                <div className={`absolute bottom-full left-0 mb-4 invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-all duration-300 rounded-2xl p-2 min-w-[200px] shadow-[0_20px_60px_rgba(0,0,0,0.7)] z-[9999] ${theme === 'dark' ? 'bg-[#1B1730] border border-purple-500/40 backdrop-blur-3xl' : 'bg-white border border-gray-200 shadow-2xl'}`}>
+                                    <div className={`px-3 py-1.5 mb-2 border-b ${theme === 'dark' ? 'border-purple-500/10' : 'border-gray-100'}`}>
+                                        <p className={`text-[10px] font-black uppercase tracking-widest ${theme === 'dark' ? 'text-purple-300/40' : 'text-gray-400'}`}>Select Language</p>
+                                    </div>
                                     {['English', 'Hindi', 'Marathi', 'Bengali', 'Tamil', 'Telugu', 'Kannada', 'Gujarati', 'Malayalam', 'Punjabi', 'Odia'].map(lang => (
                                         <button
                                             key={lang}
                                             type="button"
-                                            onClick={() => setSelectedLanguage(lang)}
-                                            className={`w-full text-left px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded-md transition-colors ${selectedLanguage === lang ? (theme === 'dark' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-blue-100 text-blue-600') : (theme === 'dark' ? 'text-purple-300 hover:bg-purple-500/10' : 'text-slate-700 hover:bg-blue-50')}`}
+                                            onClick={() => setLanguage(lang)}
+                                            className={`w-full text-left px-3 py-2 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all duration-200 mb-0.5 ${language === lang ? (theme === 'dark' ? 'bg-gradient-to-r from-purple-500/20 to-purple-500/10 text-purple-300 border border-purple-500/30' : 'bg-blue-100 text-blue-600') : (theme === 'dark' ? 'text-purple-300/60 hover:text-purple-300 hover:bg-purple-500/10' : 'text-slate-700 hover:bg-blue-50')}`}
                                         >
-                                            {lang}
+                                            <div className="flex items-center justify-between">
+                                                {lang}
+                                                {language === lang && <div className={`w-1 h-1 rounded-full ${theme === 'dark' ? 'bg-purple-400 shadow-[0_0_8px_rgba(167,139,250,0.8)]' : 'bg-blue-500'}`} />}
+                                            </div>
                                         </button>
                                     ))}
                                 </div>
@@ -308,15 +324,26 @@ const ChatBot = ({ theme = 'dark' }) => {
                             {/* Main Input Container */}
                             <div className="flex-1 relative group">
                                 {isListening && (
-                                    <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-                                        <span className="text-xs text-red-400/80 font-bold animate-pulse">LISTENING...</span>
+                                    <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none space-x-1">
+                                        {[1, 2, 3, 4, 5].map(i => (
+                                            <div
+                                                key={i}
+                                                className="w-1 bg-red-500 rounded-full animate-pulse"
+                                                style={{
+                                                    height: `${Math.random() * 15 + 5}px`,
+                                                    animationDelay: `${i * 0.1}s`,
+                                                    animationDuration: '0.6s'
+                                                }}
+                                            />
+                                        ))}
+                                        <span className="ml-2 text-[10px] text-red-500 font-black uppercase tracking-widest animate-pulse">{t.analyzing}</span>
                                     </div>
                                 )}
                                 <input
                                     type="text"
                                     value={inputValue}
                                     onChange={(e) => setInputValue(e.target.value)}
-                                    placeholder={isListening ? "" : "Ask your healthcare assistant..."}
+                                    placeholder={isListening ? "" : t.placeholder}
                                     className={`w-full rounded-xl py-3.5 pl-4 pr-12 border focus:outline-none focus:ring-1 transition-all shadow-inner ${theme === 'dark'
                                         ? 'bg-[#1B1730] text-gray-100 placeholder-purple-400/40 border-purple-500/10 focus:border-purple-500/40 focus:ring-purple-500/20'
                                         : 'bg-gray-100 text-slate-800 placeholder-gray-400 border-gray-200 focus:border-blue-500/40 focus:ring-blue-500/10'

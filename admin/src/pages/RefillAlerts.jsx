@@ -32,9 +32,11 @@ export default function RefillAlerts() {
         isOverdue: a.isOverdue,
         customer: a.userId?.name || 'Anonymous',
         userId: a.userId?._id,
-        notified: a.notified
+        notified: a.notified,
+        createdAt: a.createdAt
       }));
-      setAlerts(mapped);
+      const sorted = mapped.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+      setAlerts(sorted);
     }
   }, [alertData]);
 

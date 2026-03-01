@@ -3,6 +3,7 @@ const Order = require('../schema/Order');
 const RefillAlert = require('../schema/RefillAlert');
 const Notification = require('../schema/Notification');
 const User = require('../schema/User');
+const stockAlertController = require('./stockAlertController');
 
 exports.getStats = async (req, res) => {
     try {
@@ -75,6 +76,9 @@ exports.updateOrderStatus = async (req, res) => {
         // 1. Restore stock if moving BACK from DELIVERED
         if (previousStatus === 'DELIVERED' && status !== 'DELIVERED') {
             for (const item of order.items) {
+                const oldMed = await Medicine.findById(item.medicineId);
+                const oldStock = oldMed ? oldMed.stock : -1;
+
                 const med = await Medicine.findByIdAndUpdate(item.medicineId, {
                     $inc: { stock: item.quantity },
                     lowStockNotified: false
@@ -86,6 +90,12 @@ exports.updateOrderStatus = async (req, res) => {
                         change: item.quantity,
                         reason: 'ORDER_STATUS_REVERTED_FROM_DELIVERY'
                     }).save();
+
+                    // Trigger Back-in-Stock Notifications if stock was 0 but is now > 0
+                    if (oldStock === 0 && med.stock > 0) {
+                        console.log(`[AVAILABILITY_REVERT] Stock for ${med.name} restored via Order Revert. Notifying users...`);
+                        await stockAlertController.notifyBackInStock(med._id);
+                    }
                 } else {
                     console.warn(`[Stock Restore] Medicine ${item.medicineId} not found for order ${order._id}`);
                 }

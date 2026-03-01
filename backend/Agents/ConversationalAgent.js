@@ -45,18 +45,26 @@ class ConversationalAgent {
         return true;
     }
 
-    async processMessage(userMessage, chatHistory, orderHistory, availableMedicines, userPrescriptions, userCart, userName, parentTrace = null, sessionId = null) {
+    async processMessage(userMessage, chatHistory, orderHistory, availableMedicines, userPrescriptions, userCart, userName, parentTrace = null, sessionId = null, userLanguage = 'English') {
         const langfuse = require('../utils/langfuseClient');
         const span = parentTrace ? parentTrace.span({
             name: "Conversational-Agent-Brain",
-            input: { userMessage, userName },
+            input: { userMessage, userName, userLanguage },
             metadata: { sessionId }
         }) : null;
-
-        let lastError = "";
+        // ... (lines 56-57 remain same)
         const prompt = `
 # ROLE
 You are Dr. Saahil, a Licensed Expert AI Pharmacist. Use clinical precision and deep empathy.
+
+# LANGUAGE PARITY
+The user's preferred language is ${userLanguage}.
+- You MUST respond STRICTLY in the script of ${userLanguage}.
+- If ${userLanguage} is Marathi, your 'answer' field MUST be in Marathi script (Devanagari).
+- If ${userLanguage} is Hindi, use Hindi script (Devanagari).
+- Never use English translations or Latin script for Indic languages unless specifically asked.
+- Only use English if ${userLanguage} is English.
+- Your entire JSON 'answer' field content must be in ${userLanguage}.
 
 # KNOWLEDGE BASE (TRUSTED DATA ONLY)
 - User: ${userName}
@@ -65,7 +73,7 @@ You are Dr. Saahil, a Licensed Expert AI Pharmacist. Use clinical precision and 
 - Past Orders: ${JSON.stringify(orderHistory)}
 - User Prescriptions: ${JSON.stringify(userPrescriptions.map(p => ({ medicine: p.medicineId.name, status: p.status, expiry: p.validTill })))}
 - History: ${JSON.stringify(chatHistory.slice(-6))}
-- User Message: "${userMessage}"
+- User Message (Translated to English for processing): "${userMessage}"
 
 # REASONING PROTOCOL (THINK BEFORE ANSWERING)
 1. **Analyze Intent**: What is the user trying to do? 
@@ -207,11 +215,9 @@ You are Dr. Saahil, a Licensed Expert AI Pharmacist. Use clinical precision and 
         return finalResponse;
     }
 
-    async translateMessage(message, targetLanguage, sourceLanguage = 'English') {
-        const target = targetLanguage?.toLowerCase() || 'english';
-        const source = sourceLanguage?.toLowerCase() || 'english';
-
-        if (target === source) return message;
+    async translateMessage(message, target, source = 'English') {
+        if (!message) return "";
+        if (target.toLowerCase() === source.toLowerCase()) return message;
 
         const langMap = {
             'hindi': 'hi-IN',
@@ -227,8 +233,10 @@ You are Dr. Saahil, a Licensed Expert AI Pharmacist. Use clinical precision and 
             'english': 'en-IN'
         };
 
-        const targetCode = langMap[target];
-        const sourceCode = langMap[source];
+        const targetCode = langMap[target.toLowerCase()];
+        const sourceCode = langMap[source.toLowerCase()];
+
+        if (targetCode === sourceCode) return message;
 
         // 1. Try Sarvam AI (Indic Specialized)
         if (this.sarvamKey && targetCode && sourceCode && (targetCode !== 'en-IN' || sourceCode !== 'en-IN')) {

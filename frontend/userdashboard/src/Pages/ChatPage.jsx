@@ -10,9 +10,10 @@ import { useOrders } from '../context/OrderContext';
 import { useSidebar } from '../context/SidebarContext';
 import { useChat } from '../context/ChatContext';
 import { Button, ChatBubble, Badge, Toast } from '../Component/UI';
+import api from '../services/api';
 
 const ChatPage = () => {
-  const { theme, language } = useTheme();
+  const { theme, language, setLanguage } = useTheme();
   const { placeOrder } = useOrders();
   const { collapseSidebar, expandSidebar } = useSidebar();
   const {
@@ -35,64 +36,80 @@ const ChatPage = () => {
   const [isLangMenuOpen, setIsLangMenuOpen] = useState(false);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
-  const recognitionRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
   const [shouldDiscard, setShouldDiscard] = useState(false);
 
-  const { setLanguage } = useTheme();
+  const translations = {
+    'English': { placeholder: 'Message AI Pharmacist...', analyzing: 'Analyzing Voice...' },
+    'Hindi': { placeholder: 'AI फार्मासिस्ट को संदेश भेजें...', analyzing: 'आवाज़ का विश्लेषण...' },
+    'Marathi': { placeholder: 'AI फार्मासिस्टला संदेश पाठवा...', analyzing: 'आवाजाचे विश्लेषण सुरू आहे...' }
+  };
+  const t = translations[language] || translations['English'];
 
-  useEffect(() => {
-    // Initialize SpeechRecognition
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      recognitionRef.current = new SpeechRecognition();
-      recognitionRef.current.continuous = false;
-      recognitionRef.current.interimResults = false;
-
-      recognitionRef.current.onstart = () => setIsListening(true);
-      recognitionRef.current.onend = () => {
-        setIsListening(false);
-        setShouldDiscard(false);
-      };
-      recognitionRef.current.onerror = (event) => {
-        console.error("Speech recognition error:", event.error);
-        setIsListening(false);
-        setShouldDiscard(false);
-        setToastMsg(`Error: ${event.error}`);
-        setShowToast(true);
-      };
-      recognitionRef.current.onresult = (event) => {
-        if (shouldDiscard) return;
-        const transcript = event.results[0][0].transcript;
-        setInputValue(prev => (prev ? `${prev} ${transcript}` : transcript));
-      };
-    }
-  }, [shouldDiscard]);
-
-  const toggleListening = () => {
-    if (!recognitionRef.current) {
-      setToastMsg("Speech recognition is not supported in this browser.");
-      setShowToast(true);
-      return;
-    }
-
+  const toggleListening = async () => {
     if (isListening) {
-      recognitionRef.current.stop();
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      setIsListening(false);
     } else {
-      setShouldDiscard(false);
-      recognitionRef.current.start();
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mediaRecorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = mediaRecorder;
+        audioChunksRef.current = [];
+
+        mediaRecorder.ondataavailable = (e) => audioChunksRef.current.push(e.data);
+
+        mediaRecorder.onstop = async () => {
+          if (shouldDiscard) {
+            setShouldDiscard(false);
+            return;
+          }
+
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          const formData = new FormData();
+          formData.append('language', language);
+          formData.append('audio', audioBlob, 'voice.webm');
+
+          try {
+            const { data } = await api.post('/agent/stt', formData, {
+              headers: { 'Content-Type': 'multipart/form-data' }
+            });
+            if (data.transcript) {
+              setInputValue(prev => prev + (prev ? " " : "") + data.transcript);
+            }
+          } catch (err) {
+            console.error("STT Upload Error:", err);
+            setToastMsg("Failed to transcribe audio.");
+            setShowToast(true);
+          }
+
+          stream.getTracks().forEach(track => track.stop());
+        };
+
+        mediaRecorder.start();
+        setIsListening(true);
+        setShouldDiscard(false);
+      } catch (err) {
+        console.error("Microphone access denied:", err);
+      }
     }
   };
 
   const cancelListening = () => {
-    if (recognitionRef.current) {
+    if (mediaRecorderRef.current && isListening) {
       setShouldDiscard(true);
-      recognitionRef.current.stop();
+      mediaRecorderRef.current.stop();
+      setIsListening(false);
     }
   };
 
   const languages = [
     { name: 'English', flag: '🇺🇸' },
     { name: 'Hindi', flag: '🇮🇳' },
+    { name: 'Marathi', flag: '🇮🇳' },
     { name: 'Spanish', flag: '🇪🇸' },
     { name: 'French', flag: '🇫🇷' },
     { name: 'German', flag: '🇩🇪' },
@@ -130,7 +147,7 @@ const ChatPage = () => {
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
-    addMessageToActive(userMsg);
+    addMessageToActive(userMsg, false, language);
     setInputValue('');
   };
 
@@ -211,7 +228,7 @@ const ChatPage = () => {
       <div className="flex-1 flex flex-col relative bg-transparent">
 
         {/* Chat Header */}
-        <div className="px-8 py-4 flex items-center justify-between border-b border-brand-border-color bg-brand-card/50 backdrop-blur-sm">
+        <div className="relative z-50 px-8 py-4 flex items-center justify-between border-b border-brand-border-color bg-brand-card/50 backdrop-blur-sm shadow-sm">
           <div className="flex items-center space-x-3">
             {/* Sidebar toggle button visible on xl+ */}
             <button
@@ -242,7 +259,7 @@ const ChatPage = () => {
                   initial={{ opacity: 0, y: 10, scale: 0.95 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                  className={`absolute right-0 top-full mt-2 w-48 rounded-2xl shadow-2xl border z-50 overflow-hidden ${theme === 'dark' ? 'bg-slate-900 border-white/10' : 'bg-white border-slate-200'
+                  className={`absolute right-0 top-full mt-2 w-48 rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.5)] border z-[9999] overflow-hidden ${theme === 'dark' ? 'bg-slate-900 border-white/10' : 'bg-white border-slate-200'
                     }`}
                 >
                   <div className="py-2 px-1">
@@ -321,7 +338,7 @@ const ChatPage = () => {
                         />
                       ))}
                     </div>
-                    <span className="text-white text-[10px] font-black uppercase tracking-[0.2em] animate-pulse">Recording Audio...</span>
+                    <span className="text-white text-[10px] font-black uppercase tracking-[0.2em] animate-pulse">{t.analyzing}</span>
                   </div>
 
                   <div className="flex items-center space-x-3">
@@ -373,7 +390,7 @@ const ChatPage = () => {
                 type="text"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                placeholder="Message AI Pharmacist..."
+                placeholder={t.placeholder}
                 className="flex-1 bg-transparent border-none outline-none px-4 py-2 text-sm font-bold text-brand-text-primary placeholder:text-brand-text-secondary/30"
               />
               <div className="flex items-center space-x-1">

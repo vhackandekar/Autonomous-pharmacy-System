@@ -46,6 +46,8 @@ export const getDashboardStats = () => api.get('/admin/dashboard');
 export const getAnalytics = () => api.get('/admin/analytics');
 export const getActivity = () => api.get('/admin/activity');
 export const getInventoryDetails = () => api.get('/admin/inventory');
+export const getRefillAlerts = () => api.get('/admin/refill-alerts');
+export const runRefillAnalysis = () => api.post('/admin/refill-trigger');
 
 
 // MEDICINES
@@ -105,6 +107,7 @@ export const getVendorMedicines = (id) => api.get(`/vendor/${id}/medicines`);
 
 // REFILL REQUESTS
 export const getRefillRequests = () => api.get('/refill-request');
+export const triggerRefillAlert = (id) => api.post(`/notify/refill/${id}`);
 export const createRefillRequest = (data) => api.post('/refill-request/create', data);
 export const sendRefillToVendor = (requestId, vendorId) => api.post(`/refill-request/${requestId}/send`, { vendorId });
 

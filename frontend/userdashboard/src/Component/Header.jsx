@@ -88,11 +88,20 @@ const Header = () => {
                 ) : (
                   notifications
                     .filter(n => ['refill', 'order', 'prescription', 'medicine_available'].includes(n.type))
-                    .sort((a, b) => (a.type === 'refill' ? -1 : 1)) // Prioritize refill alerts at top
+                    .sort((a, b) => new Date(b.sentAt) - new Date(a.sentAt)) // Newest first
                     .map((notif) => (
                       <div
                         key={notif._id}
-                        onClick={() => !notif.isRead && markNotificationAsRead(notif._id)}
+                        onClick={() => {
+                          if (!notif.isRead) markNotificationAsRead(notif._id);
+                          if (notif.type === 'medicine_available') {
+                            navigate('/chat');
+                          } else if (notif.type === 'order') {
+                            navigate('/orders');
+                          } else if (notif.type === 'prescription') {
+                            navigate('/prescriptions');
+                          }
+                        }}
                         className={`flex items-start space-x-4 px-4 py-4 hover:bg-brand-hover-tint transition-colors cursor-pointer relative group ${!notif.isRead ? 'bg-brand-primary/[0.03]' : ''}`}
                       >
                         <div className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${!notif.isRead ? 'bg-brand-primary shadow-[0_0_8px_rgba(37,99,235,0.4)]' : 'bg-transparent'}`} />
@@ -108,6 +117,20 @@ const Header = () => {
                           <p className={`text-[11px] font-medium leading-relaxed ${!notif.isRead ? 'text-brand-text-primary' : 'text-brand-text-secondary'} line-clamp-2`}>
                             {notif.message}
                           </p>
+                          {notif.type === 'medicine_available' && (
+                            <div className="mt-2">
+                              <button
+                                className="px-3 py-1.5 bg-brand-primary text-white text-[10px] font-black uppercase tracking-widest rounded-lg hover:bg-brand-secondary transition-all shadow-md shadow-brand-primary/20"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!notif.isRead) markNotificationAsRead(notif._id);
+                                  navigate('/chat');
+                                }}
+                              >
+                                Order Now
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))

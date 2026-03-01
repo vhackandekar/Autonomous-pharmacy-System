@@ -13,6 +13,7 @@ import AgentChat from './pages/AgentChat';
 import ManageVendors from './pages/ManageVendors';
 import Settings from './pages/Settings';
 import Prescriptions from './pages/Prescriptions';
+import RefillAlerts from './pages/RefillAlerts';
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, user, isInitializing } = useAuth();
@@ -56,6 +57,7 @@ function AppRoutes() {
       <Route path="/agent-chat" element={<ProtectedRoute><AgentProvider><AgentChat /></AgentProvider></ProtectedRoute>} />
       <Route path="/manage-vendors" element={<ProtectedRoute><ManageVendors /></ProtectedRoute>} />
       <Route path="/prescriptions" element={<ProtectedRoute><Prescriptions /></ProtectedRoute>} />
+      <Route path="/refill-alerts" element={<ProtectedRoute><RefillAlerts /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/dashboard" />} />
     </Routes>

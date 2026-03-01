@@ -14,35 +14,69 @@ class PrescriptionAgent {
     /**
      * Primary Pipeline: OCR -> Extract -> Match -> Validate
      */
-    async analyzePrescription(imagePath) {
+    async analyzePrescription(imagePath, userId = null, parentTrace = null, sessionId = null) {
+        const langfuse = require('../utils/langfuseClient');
+        const trace = parentTrace || (langfuse ? langfuse.trace({
+            name: "Prescription-Analysis-Pipeline",
+            userId: userId ? String(userId) : "anonymous",
+            sessionId: sessionId || "untracked-session",
+            metadata: { imagePath }
+        }) : null);
+
         let worker;
         try {
             const absolutePath = path.resolve(imagePath);
             console.log(`[PRESCRIPTION_AGENT] Processing: ${absolutePath}`);
 
             // 1. OCR EXECUTION (High fidelity worker)
+            const ocrSpan = trace ? trace.span({
+                name: "OCR-Extraction",
+                input: { path: absolutePath }
+            }) : null;
+
             worker = await Tesseract.createWorker('eng');
             const result = await worker.recognize(absolutePath);
             const { text: rawText, confidence } = result.data;
             await worker.terminate();
 
+            if (ocrSpan) ocrSpan.end({ output: { confidence, textLength: rawText.length } });
+
             // 2. TEXT NORMALIZATION
             const normalized = this._normalize(rawText);
 
             // 3. FIELD EXTRACTION
+            const extractSpan = trace ? trace.span({
+                name: "Field-Extraction",
+                input: { normalizedText: normalized }
+            }) : null;
+
             const extracted = await this._extractFields(normalized);
 
+            if (extractSpan) extractSpan.end({ output: extracted });
+
             // 4. CLINICAL VALIDATION ENGINE
+            const ruleSpan = trace ? trace.span({
+                name: "Clinical-Rules-Engine",
+                input: extracted
+            }) : null;
+
             const validation = await this._runRules(extracted);
 
-            return {
+            if (ruleSpan) ruleSpan.end({ output: validation });
+
+            const finalResult = {
                 confidence: Math.round(confidence),
                 ...extracted,
                 ...validation
             };
+
+            if (!parentTrace && trace) trace.update({ output: finalResult });
+
+            return finalResult;
         } catch (error) {
             if (worker) await worker.terminate();
             console.error("[PRESCRIPTION_AGENT_ERROR]", error);
+            if (trace) trace.update({ output: error.message, level: "ERROR" });
             throw error;
         }
     }
@@ -200,7 +234,7 @@ class PrescriptionAgent {
             }
 
             // Exact match
-            const exactMatch = extractedMedicines.some(med => 
+            const exactMatch = extractedMedicines.some(med =>
                 med.toLowerCase() === requestedMedicine.name.toLowerCase()
             );
             if (exactMatch) {
@@ -221,7 +255,7 @@ class PrescriptionAgent {
 
             // Check alternative names / synonyms
             const altNames = requestedMedicine.alternateNames || [];
-            const altMatch = extractedMedicines.some(med => 
+            const altMatch = extractedMedicines.some(med =>
                 altNames.some(alt => alt.toLowerCase() === med.toLowerCase())
             );
             if (altMatch) {
@@ -229,8 +263,8 @@ class PrescriptionAgent {
             }
 
             // No match found
-            return { 
-                isValid: false, 
+            return {
+                isValid: false,
                 reason: 'MEDICINE_MISMATCH',
                 requestedMedicine: requestedMedicine.name,
                 detectedMedicines: extractedMedicines

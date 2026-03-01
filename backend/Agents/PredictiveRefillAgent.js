@@ -177,8 +177,9 @@ class PredictiveRefillAgent {
                 }
             }
 
-            if (trace) trace.update({ output: predictions });
-            return Array.from(medicineMap.values());
+            const finalPredictions = Array.from(medicineMap.values());
+            if (trace) trace.update({ output: finalPredictions });
+            return finalPredictions;
         } catch (error) {
             console.error("PredictiveRefillAgent Critical Failure:", error);
             if (trace) trace.update({ output: error.message, level: "ERROR" });

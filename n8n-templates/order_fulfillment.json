@@ -1,5 +1,4 @@
 {
-    "name": "Production Order Fulfillment + Admin Dashboard + SMS",
     "nodes": [
         {
             "parameters": {
@@ -11,25 +10,34 @@
             "type": "n8n-nodes-base.webhook",
             "typeVersion": 1,
             "position": [
-                100,
-                300
+                1120,
+                1104
             ],
-            "webhookId": "order-trigger-001"
+            "webhookId": "order-trigger-001",
+            "id": "c798124b-16f2-4ba7-8e4f-64c9c45e0611"
         },
         {
             "parameters": {
-                "operation": "toPhone",
-                "to": "={{ $node[\"Webhook\"].json[\"body\"][\"phone\"] }}",
-                "message": "=Order Confirmed! \ud83d\udce6\nYour Pharmacy Order #{{ $node[\"Webhook\"].json[\"body\"][\"orderId\"] }} has been received and is being prepared for fulfillment.",
+                "from": "+19794755673",
+                "to": "={{ $json.body.phone }}",
+                "message": "=Order confirmed. ID: {{ $json.body.orderId }}\n\n",
                 "options": {}
             },
             "name": "Customer SMS",
             "type": "n8n-nodes-base.twilio",
             "typeVersion": 1,
             "position": [
-                400,
-                100
-            ]
+                1408,
+                896
+            ],
+            "id": "97950763-2c34-4714-a22a-9ff95f670a35",
+            "retryOnFail": true,
+            "credentials": {
+                "twilioApi": {
+                    "id": "D8mn14tHoqmSyvZ1",
+                    "name": "Twilio account"
+                }
+            }
         },
         {
             "parameters": {
@@ -44,7 +52,7 @@
                         },
                         {
                             "name": "status",
-                            "value": "IN_WAREHOUSE"
+                            "value": "PROCESSING"
                         },
                         {
                             "name": "userId",
@@ -58,24 +66,32 @@
             "type": "n8n-nodes-base.httpRequest",
             "typeVersion": 4.1,
             "position": [
-                400,
-                300
-            ]
+                1408,
+                1104
+            ],
+            "id": "9f6940d2-b09f-481f-908f-65672a4a7e8b"
         },
         {
             "parameters": {
-                "operation": "toPhone",
-                "to": "+YOUR_ADMIN_PHONE_HERE",
-                "message": "=📢 ATTENTION ADMIN:\nNew Pharmacy Order received!\nOrder ID: {{ $node[\"Webhook\"].json[\"body\"][\"orderId\"] }}\nUser ID: {{ $node[\"Webhook\"].json[\"body\"][\"userId\"] }}\nPlease check the dashboard: http://localhost:3000/admin",
+                "from": "+19794755673",
+                "to": "+919284505942",
+                "message": "=New order {{ $json.body.orderId }}. Login to admin panel.\n\n",
                 "options": {}
             },
             "name": "Admin SMS Alert",
             "type": "n8n-nodes-base.twilio",
             "typeVersion": 1,
             "position": [
-                400,
-                500
-            ]
+                1408,
+                1296
+            ],
+            "id": "1976f554-42ea-4cb6-bdda-b80f8084e93d",
+            "credentials": {
+                "twilioApi": {
+                    "id": "D8mn14tHoqmSyvZ1",
+                    "name": "Twilio account"
+                }
+            }
         }
     ],
     "connections": {
@@ -100,5 +116,10 @@
                 ]
             ]
         }
+    },
+    "pinData": {},
+    "meta": {
+        "templateCredsSetupCompleted": true,
+        "instanceId": "e54da9ece0ee8b14c0f753298959c14e4e5c6df2f0e71ddb0cc588badf61813b"
     }
 }

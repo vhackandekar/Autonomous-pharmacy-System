@@ -54,7 +54,7 @@ exports.notifyBackInStock = async (medicineId) => {
         console.log(`[STOCK_NOTIFY] Notifying ${alerts.length} users for ${medicine.name}`);
 
         const notificationPromises = alerts.map(async (alert) => {
-            const msg = `Good news! ${medicine.name} is back in stock. Order now before it runs out.`;
+            const msg = `Good news! ${medicine.name} is back in stock. Now you can proceed with the order. Click here to chat with Dr. Saahil.`;
 
             // 1. In-app notification
             const notif = new Notification({
