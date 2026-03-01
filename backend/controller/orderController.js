@@ -149,12 +149,13 @@ exports.getHistory = async (req, res) => {
 
 exports.getOrderById = async (req, res) => {
     try {
-        const order = await Order.findById(req.params.id).populate('items.medicineId');
+        const order = await Order.findById(req.params.id).populate('items.medicineId').populate('userId', 'name email phone address1 address2 city state pin');
         if (!order) return res.status(404).json({ error: 'Order not found' });
 
         // Security Check: Only the owner or an admin can view details
-        if (req.user.role !== 'ADMIN' && req.user.id !== order.userId.toString()) {
-            return res.status(403).json({ error: 'Access denied.' });
+        const orderOwnerId = order.userId._id ? order.userId._id.toString() : order.userId.toString();
+        if (req.user.role !== 'ADMIN' && req.user.id !== orderOwnerId) {
+            return res.status(403).json({ error: 'Access denied. You can only view your own order details.' });
         }
 
         res.json(order);
@@ -175,8 +176,8 @@ exports.cancelOrder = async (req, res) => {
 
         // Can only cancel if PENDING or PROCESSING?
         // Let's allow cancelling if not SHIPPED or DELIVERED for now
-        if (['SHIPPED', 'DELIVERED'].includes(order.status)) {
-            return res.status(400).json({ error: 'Cannot cancel an order that is already shipped or delivered.' });
+        if (order.status === 'DELIVERED') {
+            return res.status(400).json({ error: 'Cannot cancel an order that is already delivered.' });
         }
 
         if (order.status === 'CANCELLED') {

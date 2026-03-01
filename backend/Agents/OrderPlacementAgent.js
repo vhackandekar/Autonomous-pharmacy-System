@@ -243,7 +243,7 @@ class OrderPlacementAgent {
 
             // 2. UPDATE ORDER, STOCK & PRESCRIPTION USAGE
             order.estimatedEndDate = estimatedEndDate;
-            order.status = 'PENDING'; // Match aligned status enum
+            // order.status = 'PENDING'; // Redundant. Already set in controller
             await order.save();
 
             for (const item of order.items) {

@@ -46,12 +46,16 @@ exports.getStats = async (req, res) => {
 
 exports.getAllOrders = async (req, res) => {
     try {
-        const orders = await Order.find().populate('userId', 'name email').populate('items.medicineId');
+        const orders = await Order.find().populate('userId', 'name email phone address1 address2 city state pin').populate('items.medicineId');
         res.json(orders);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 };
+
+const InventoryLog = require('../schema/InventoryLog');
+const axios = require('axios');
+const PredictiveRefillAgent = require('../Agents/PredictiveRefillAgent');
 
 exports.updateOrderStatus = async (req, res) => {
     try {
@@ -62,39 +66,55 @@ exports.updateOrderStatus = async (req, res) => {
             return res.status(400).json({ error: 'Invalid status' });
         }
 
-        const order = await Order.findById(req.params.id);
+        const order = await Order.findById(req.params.id).populate('items.medicineId').populate('userId', 'name email phone address1 address2 city state pin');
         if (!order) return res.status(404).json({ error: 'Order not found' });
 
-        // CRITICAL: Prevent reverting from DELIVERED status
-        if (order.status === 'DELIVERED') {
-            return res.status(400).json({ error: 'Order is already delivered and cannot be modified.' });
+        const previousStatus = order.status;
+        console.log(`Updating order ${order._id} from ${previousStatus} to ${status}`);
+
+        // 1. Restore stock if moving BACK from DELIVERED
+        if (previousStatus === 'DELIVERED' && status !== 'DELIVERED') {
+            for (const item of order.items) {
+                const med = await Medicine.findByIdAndUpdate(item.medicineId, {
+                    $inc: { stock: item.quantity },
+                    lowStockNotified: false
+                }, { new: true });
+
+                if (med) {
+                    await new InventoryLog({
+                        medicineId: med._id,
+                        change: item.quantity,
+                        reason: 'ORDER_STATUS_REVERTED_FROM_DELIVERY'
+                    }).save();
+                } else {
+                    console.warn(`[Stock Restore] Medicine ${item.medicineId} not found for order ${order._id}`);
+                }
+            }
         }
 
-        const previousStatus = order.status;
-
-        // NEW LOGIC: Deduct stock ONLY when moving to DELIVERED status
+        // 2. Deduct stock ONLY when moving to DELIVERED status from anything else
         if (status === 'DELIVERED' && previousStatus !== 'DELIVERED') {
-            const axios = require('axios');
             for (const item of order.items) {
-                // 1. Deduct Stock
+                // Deduct Stock
                 const med = await Medicine.findByIdAndUpdate(item.medicineId, {
                     $inc: { stock: -item.quantity },
                     lowStockNotified: false
                 }, { new: true });
 
-                if (!med) continue;
+                if (!med) {
+                    console.warn(`[Stock Deduct] Medicine ${item.medicineId} not found for order ${order._id}`);
+                    continue;
+                }
 
-                // 2. Log Inventory Change
-                const InventoryLog = require('../schema/InventoryLog');
+                // Log Inventory Change
                 await new InventoryLog({
                     medicineId: med._id,
                     change: -item.quantity,
                     reason: 'ORDER_DELIVERED'
                 }).save();
 
-                // 3. Low Stock Check
+                // Low Stock Check
                 if (med.stock < (med.reorderLevel || 10) && !med.lowStockNotified) {
-                    // Internal Admin Notification
                     const adminNotif = new Notification({
                         recipientRole: 'ADMIN',
                         type: 'stock_alert',
@@ -104,7 +124,6 @@ exports.updateOrderStatus = async (req, res) => {
 
                     if (global.io) global.io.to('admin').emit('stock_alert', adminNotif);
 
-                    // Optional External Webhook
                     if (process.env.N8N_REFILL_WEBHOOK_URL) {
                         axios.post(process.env.N8N_REFILL_WEBHOOK_URL, {
                             type: 'STOCK_ALERT',
@@ -113,7 +132,6 @@ exports.updateOrderStatus = async (req, res) => {
                         }).catch(e => console.error('Webhook failed', e.message));
                     }
 
-                    // Mark as notified
                     med.lowStockNotified = true;
                     await med.save();
                 }
@@ -123,7 +141,7 @@ exports.updateOrderStatus = async (req, res) => {
         order.status = status;
         await order.save();
 
-        // Create a notification for the user and emit real-time update
+        // Create notifications and emit updates
         try {
             let msg = (status === 'REJECTED' || status === 'CANCELLED')
                 ? `Your order ${order._id} was ${status.toLowerCase()}.`
@@ -143,13 +161,15 @@ exports.updateOrderStatus = async (req, res) => {
 
             // Trigger Predictive Refill Analysis immediately upon delivery
             if (status === 'DELIVERED') {
-                const PredictiveRefillAgent = require('../Agents/PredictiveRefillAgent');
                 PredictiveRefillAgent.analyzeAndAlert(order.userId).catch(err => console.error('delivery refill analyze error', err));
             }
-        } catch (e) { console.error('notify error', e); }
+        } catch (e) {
+            console.error('Notification/Socket Error:', e);
+        }
 
         res.json(order);
     } catch (error) {
+        console.error('Update Order Status Error:', error);
         res.status(500).json({ error: error.message });
     }
 };

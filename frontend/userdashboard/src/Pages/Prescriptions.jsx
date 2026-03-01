@@ -23,6 +23,7 @@ const PrescriptionsPage = () => {
     const [file, setFile] = useState(null);
     const [isUploading, setIsUploading] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
+    const [viewingInsights, setViewingInsights] = useState(null);
 
     const [showToast, setShowToast] = useState(false);
     const [toastMsg, setToastMsg] = useState('');
@@ -127,143 +128,9 @@ const PrescriptionsPage = () => {
                 </button>
             </div>
 
-            <div className="grid lg:grid-cols-3 gap-8">
-                {/* 1. Upload Portal */}
-                <div className="lg:col-span-1">
-                    <Card className="sticky top-28 overflow-hidden bg-brand-card/50 backdrop-blur-md border hover:border-brand-primary/20 transition-all duration-500 shadow-xl shadow-brand-primary/5">
-                        <div className="flex items-center space-x-3 mb-6">
-                            <div className="p-2.5 bg-brand-primary/10 rounded-xl text-brand-primary">
-                                <Upload size={18} />
-                            </div>
-                            <h3 className="font-black text-[10px] uppercase tracking-[0.2em] opacity-60">Rapid Upload Portal</h3>
-                        </div>
-
-                        <form onSubmit={handleUpload} className="space-y-6">
-                            <div className="space-y-2 relative">
-                                <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1">Search Medication</label>
-                                <div className="relative">
-                                    <input
-                                        type="text"
-                                        placeholder="Type medicine name..."
-                                        value={selectedMedicine ? selectedMedicine.name : searchTerm}
-                                        onChange={(e) => {
-                                            setSearchTerm(e.target.value);
-                                            setSelectedMedicine(null);
-                                            setIsDropdownOpen(true);
-                                        }}
-                                        onFocus={() => setIsDropdownOpen(true)}
-                                        className="w-full bg-brand-background border border-brand-border-color rounded-xl px-4 py-3.5 text-sm font-bold text-brand-text-primary outline-none focus:border-brand-primary/50 transition-all shadow-inner"
-                                    />
-                                    {selectedMedicine && (
-                                        <button
-                                            type="button"
-                                            onClick={() => { setSelectedMedicine(null); setSearchTerm(''); }}
-                                            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 hover:bg-brand-hover-tint rounded-lg text-rose-500"
-                                        >
-                                            <X size={14} />
-                                        </button>
-                                    )}
-                                </div>
-
-                                {/* Custom Autocomplete Dropdown */}
-                                <AnimatePresence>
-                                    {isDropdownOpen && !selectedMedicine && searchTerm.length > 0 && (
-                                        <motion.div
-                                            initial={{ opacity: 0, y: -10 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            exit={{ opacity: 0, y: -10 }}
-                                            className="absolute z-50 w-full mt-2 bg-brand-card border border-brand-border-color rounded-2xl shadow-2xl max-h-60 overflow-y-auto backdrop-blur-xl"
-                                        >
-                                            {medicines.filter(m => m.name.toLowerCase().includes(searchTerm.toLowerCase())).length > 0 ? (
-                                                medicines
-                                                    .filter(m => m.name.toLowerCase().includes(searchTerm.toLowerCase()))
-                                                    .map(m => (
-                                                        <button
-                                                            key={m._id}
-                                                            type="button"
-                                                            onClick={() => {
-                                                                if (m.stock > 0) {
-                                                                    setSelectedMedicine(m);
-                                                                    setIsDropdownOpen(false);
-                                                                }
-                                                            }}
-                                                            className={`w-full text-left px-4 py-3 hover:bg-brand-primary/10 transition-colors flex items-center justify-between group ${m.stock === 0 ? 'cursor-default opacity-80' : ''}`}
-                                                        >
-                                                            <div className="flex flex-col">
-                                                                <span className="text-sm font-bold text-brand-text-primary">{m.name}</span>
-                                                                <div className="flex items-center space-x-2">
-                                                                    <span className="text-[10px] opacity-40 uppercase font-black">{m.category || m.unitType}</span>
-                                                                    {m.stock === 0 && (
-                                                                        <span className="text-[9px] font-black text-rose-500 uppercase tracking-tighter bg-rose-500/10 px-1.5 py-0.5 rounded">Out of Stock</span>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-
-                                                            {m.stock > 0 ? (
-                                                                <ArrowRight size={14} className="opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all text-brand-primary" />
-                                                            ) : (
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={async (e) => {
-                                                                        e.stopPropagation();
-                                                                        try {
-                                                                            const { data } = await stockAlertAPI.subscribe(m._id);
-                                                                            setToastMsg(data.message);
-                                                                            setToastType('success');
-                                                                            setShowToast(true);
-                                                                        } catch (err) {
-                                                                            setToastMsg(err.response?.data?.error || "Subscription failed");
-                                                                            setToastType('error');
-                                                                            setShowToast(true);
-                                                                        }
-                                                                    }}
-                                                                    className="px-3 py-1.5 bg-brand-primary text-white text-[9px] font-black uppercase tracking-widest rounded-lg hover:bg-brand-secondary transition-all shadow-sm shadow-brand-primary/20"
-                                                                >
-                                                                    Notify Me
-                                                                </button>
-                                                            )}
-                                                        </button>
-                                                    ))
-                                            ) : (
-                                                <div className="p-4 text-center text-[10px] font-black uppercase opacity-20 tracking-widest">
-                                                    No medicines matched
-                                                </div>
-                                            )}
-                                        </motion.div>
-                                    )}
-                                </AnimatePresence>
-                            </div>
-
-                            <div className="space-y-2">
-                                <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1">Document Source</label>
-                                <label className="group block cursor-pointer">
-                                    <input type="file" onChange={(e) => setFile(e.target.files[0])} className="hidden" accept="image/*,.pdf" />
-                                    <div className={`
-                                        w-full h-32 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center p-4 transition-all duration-300
-                                        ${file ? 'border-brand-primary bg-brand-primary/5 shadow-inner' : 'border-brand-border-color hover:border-brand-primary/30'}
-                                    `}>
-                                        <FileText size={20} className={file ? 'text-brand-primary animate-bounce' : 'opacity-20'} />
-                                        <span className="text-[10px] font-black uppercase tracking-widest mt-2 truncate w-full text-center">
-                                            {file ? file.name : 'Attach Prescription'}
-                                        </span>
-                                    </div>
-                                </label>
-                            </div>
-
-                            <Button
-                                type="submit"
-                                className="w-full py-4 uppercase tracking-[0.2em] text-[10px] shadow-lg shadow-brand-primary/20"
-                                disabled={isUploading || !file}
-                                loading={isUploading}
-                            >
-                                Start Autonomous Scan
-                            </Button>
-                        </form>
-                    </Card>
-                </div>
-
-                {/* 2. Verification History */}
-                <div className="lg:col-span-2 space-y-4">
+            <div className="space-y-4">
+                {/* Verification History */}
+                <div className="space-y-4">
                     {isLoading ? (
                         <div className="flex flex-col items-center justify-center py-20 space-y-4">
                             <Loader2 className="animate-spin text-brand-primary opacity-20" size={32} />
@@ -339,6 +206,14 @@ const PrescriptionsPage = () => {
 
                                             {/* Actions */}
                                             <div className="flex flex-col gap-2">
+                                                <button
+                                                    onClick={() => setViewingInsights(viewingInsights === presc._id ? null : presc._id)}
+                                                    className={`p-3 rounded-xl transition-all ${viewingInsights === presc._id ? 'bg-brand-primary text-white' : 'bg-brand-hover-tint text-brand-text-secondary hover:text-brand-primary hover:bg-brand-primary/10'}`}
+                                                    type="button"
+                                                    title="View Extraction Insights"
+                                                >
+                                                    <FileSearch size={16} />
+                                                </button>
                                                 <a
                                                     href={`http://localhost:5000${presc.imageUrl}`}
                                                     target="_blank"
@@ -356,6 +231,34 @@ const PrescriptionsPage = () => {
                                                     <Trash2 size={16} />
                                                 </button>
                                             </div>
+
+                                            {/* OCR Insights Overlay/Drawer */}
+                                            {viewingInsights === presc._id && (
+                                                <motion.div
+                                                    initial={{ height: 0, opacity: 0 }}
+                                                    animate={{ height: 'auto', opacity: 1 }}
+                                                    className="absolute inset-x-0 bottom-0 bg-brand-card border-t border-brand-border-color p-4 z-10"
+                                                >
+                                                    <div className="flex justify-between items-center mb-2">
+                                                        <h5 className="text-[10px] font-black uppercase tracking-widest opacity-60">Autonomous Extraction Insights</h5>
+                                                        <button onClick={() => setViewingInsights(null)} className="text-rose-500 hover:bg-rose-500/10 p-1 rounded-lg">
+                                                            <X size={12} />
+                                                        </button>
+                                                    </div>
+                                                    <div className="bg-brand-background rounded-xl p-3 border border-brand-border-color overflow-hidden">
+                                                        <pre className="text-[10px] font-mono text-emerald-500 overflow-x-auto">
+                                                            {JSON.stringify({
+                                                                engine: "Tesseract.js OCR",
+                                                                confidence: presc.extractedData?.confidence,
+                                                                medicines: presc.extractedData?.detectedMedicines,
+                                                                dosage: presc.extractedData?.dosage,
+                                                                doctor: presc.extractedData?.doctorName,
+                                                                timestamp: presc.createdAt
+                                                            }, null, 2)}
+                                                        </pre>
+                                                    </div>
+                                                </motion.div>
+                                            )}
                                         </Card>
                                     </motion.div>
                                 ))}
@@ -371,7 +274,7 @@ const PrescriptionsPage = () => {
                 type={toastType}
                 onClose={() => setShowToast(false)}
             />
-        </div>
+        </div >
     );
 };
 

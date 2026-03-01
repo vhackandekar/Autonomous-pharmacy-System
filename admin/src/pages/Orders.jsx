@@ -15,13 +15,13 @@ const mockOrders = [
   { _id: '6', id: 'ORD-8897', userId: { name: 'Raj Patel' }, items: [{ medicineId: { name: 'Amoxicillin' }, quantity: 2 }], totalAmount: 17000, status: 'REJECTED', orderDate: new Date('2024-01-15') },
 ];
 
-const ORDER_STATUSES = ['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
+const ORDER_STATUSES = ['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'REJECTED'];
 
-const normalizeStatus = (s) => (s === 'Cancelled' || s === 'REJECTED') ? 'REJECTED' : s;
+const normalizeStatus = (s) => s?.toUpperCase() || 'PENDING';
 
 const statusClass = (s) => {
   const normalized = normalizeStatus(s);
-  return normalized?.toLowerCase().replace('_', '_') || 'pending';
+  return normalized.toLowerCase().replace('_', '-');
 };
 
 export default function Orders() {
@@ -29,8 +29,6 @@ export default function Orders() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
-  // Normalize REJECTED to CANCELLED for the UI filters/stats
-  const normalizeStatus = (s) => (s === 'REJECTED' ? 'CANCELLED' : s);
   const [selected, setSelected] = useState(null);
   const [updatingId, setUpdatingId] = useState(null);
   const [page, setPage] = useState(1);
@@ -82,17 +80,21 @@ export default function Orders() {
   }, [refetch]);
 
   const handleStatusUpdate = async (orderId, status) => {
+    const loadingToast = toast.loading(`Updating status to ${status}...`);
     setUpdatingId(orderId);
     try {
       await updateOrderStatus(orderId, status);
       setOrders(p => p.map(o => o._id === orderId ? { ...o, status } : o));
       if (selected?._id === orderId) setSelected(p => ({ ...p, status }));
-      toast.success(`Order status updated to ${status}`);
+      toast.success(`Order status updated to ${status}`, { id: loadingToast });
       refetch(); // Refetch to keep data in sync
-    } catch {
-      setOrders(p => p.map(o => o._id === orderId ? { ...o, status } : o));
-      toast.success(`Status updated to ${status} (demo)`);
-    } finally { setUpdatingId(null); }
+    } catch (err) {
+      console.error('Status update failed:', err);
+      const msg = err.response?.data?.error || err.message || 'Failed to update status';
+      toast.error(msg, { id: loadingToast });
+    } finally {
+      setUpdatingId(null);
+    }
   };
 
   const filtered = orders.filter(o => {
@@ -189,7 +191,7 @@ export default function Orders() {
                         style={{ padding: '5px 8px', fontSize: 12 }}
                         value={normalizeStatus(order.status)}
                         onChange={e => handleStatusUpdate(order._id, e.target.value)}
-                        disabled={updatingId === order._id || order.status === 'Cancelled'}
+                        disabled={updatingId === order._id}
                       >
                         {ORDER_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
@@ -242,6 +244,23 @@ export default function Orders() {
               ))}
             </div>
 
+            <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 14, marginBottom: 16 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Shipping Address</div>
+              <div style={{ fontWeight: 600 }}>
+                {selected.userId?.address1 ? (
+                  [
+                    selected.userId.address1,
+                    selected.userId.address2,
+                    selected.userId.city,
+                    selected.userId.state,
+                    selected.userId.pin
+                  ].filter(Boolean).join(', ')
+                ) : (
+                  'No address provided - Direct Pickup'
+                )}
+              </div>
+            </div>
+
             <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, overflow: 'hidden' }}>
               <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
                 Items Ordered
@@ -260,7 +279,7 @@ export default function Orders() {
                 className="filter-select"
                 value={normalizeStatus(selected.status)}
                 onChange={e => handleStatusUpdate(selected._id, e.target.value)}
-                disabled={selected.status === 'Cancelled'}
+                disabled={false}
               >
                 {ORDER_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
               </select>

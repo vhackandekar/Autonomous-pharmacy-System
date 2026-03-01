@@ -13,10 +13,13 @@ const MyOrders = () => {
 
   const getStatusVariant = (status) => {
     switch (status.toUpperCase()) {
+      case 'PENDING': return 'warning';
+      case 'PROCESSING': return 'info';
       case 'CONFIRMED': return 'info';
       case 'PLACED': return 'warning';
       case 'IN_WAREHOUSE': return 'purple';
       case 'SHIPPED': return 'purple';
+      case 'DELIVERED': return 'success';
       case 'FULFILLED': return 'success';
       case 'REJECTED': return 'error';
       case 'CANCELLED': return 'error';
@@ -25,7 +28,7 @@ const MyOrders = () => {
   };
 
   const activeOrders = orders.filter(order =>
-    ['Awaiting Payment', 'Placed', 'CONFIRMED', 'IN_WAREHOUSE', 'SHIPPED'].includes(order.status)
+    ['Awaiting Payment', 'Placed', 'CONFIRMED', 'IN_WAREHOUSE', 'SHIPPED', 'PENDING', 'AWAITING_CONFIRMATION', 'PROCESSING'].includes(order.status.toUpperCase())
   );
 
   return (

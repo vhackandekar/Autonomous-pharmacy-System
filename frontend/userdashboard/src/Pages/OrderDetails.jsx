@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { 
-  ArrowLeft, Package, Truck, CheckCircle2, 
+import {
+  ArrowLeft, Package, Truck, CheckCircle2,
   MapPin, CreditCard, Clock, AlertCircle,
   FileText, ShieldCheck
 } from 'lucide-react';
@@ -43,23 +43,35 @@ const OrderDetails = () => {
     </div>
   );
 
-  const getStatusColor = (status) => {
+  const getStatusVariant = (status) => {
     switch (status.toUpperCase()) {
-      case 'CONFIRMED': case 'FULFILLED': return 'bg-brand-success text-white';
-      case 'CANCELLED': case 'REJECTED': return 'bg-red-500 text-white';
-      default: return 'bg-brand-primary text-white';
+      case 'PENDING': return 'warning';
+      case 'PROCESSING': return 'info';
+      case 'CONFIRMED': return 'info';
+      case 'PLACED': return 'warning';
+      case 'IN_WAREHOUSE': return 'purple';
+      case 'SHIPPED': return 'purple';
+      case 'DELIVERED': return 'success';
+      case 'FULFILLED': return 'success';
+      case 'REJECTED': return 'error';
+      case 'CANCELLED': return 'error';
+      default: return 'info';
     }
   };
 
   const steps = [
-    { id: 'Placed', icon: <Package size={18} />, label: 'Order Placed' },
-    { id: 'CONFIRMED', icon: <ShieldCheck size={18} />, label: 'Confirmed' },
+    { id: 'PENDING', icon: <Package size={18} />, label: 'Order Placed' },
+    { id: 'PROCESSING', icon: <ShieldCheck size={18} />, label: 'Processing' },
     { id: 'SHIPPED', icon: <Truck size={18} />, label: 'Shipped' },
-    { id: 'FULFILLED', icon: <CheckCircle2 size={18} />, label: 'Delivered' }
+    { id: 'DELIVERED', icon: <CheckCircle2 size={18} />, label: 'Delivered' }
   ];
 
-  const currentStepIndex = steps.findIndex(step => 
-    step.id === order.status || (order.status === 'IN_WAREHOUSE' && step.id === 'CONFIRMED')
+  const currentStepIndex = steps.findIndex(step =>
+    step.id === order.status.toUpperCase() ||
+    (order.status.toUpperCase() === 'PLACED' && step.id === 'PENDING') ||
+    (order.status.toUpperCase() === 'CONFIRMED' && step.id === 'PROCESSING') ||
+    (order.status.toUpperCase() === 'IN_WAREHOUSE' && step.id === 'PROCESSING') ||
+    (order.status.toUpperCase() === 'FULFILLED' && step.id === 'DELIVERED')
   );
 
   return (
@@ -83,7 +95,7 @@ const OrderDetails = () => {
           >
             <div className="flex items-center justify-between mb-4">
               <h1 className="text-3xl font-black tracking-tight text-black dark:text-white">Order #{order._id.slice(-6).toUpperCase()}</h1>
-              <Badge variant={order.status === 'Cancelled' ? 'error' : 'success'}>
+              <Badge variant={getStatusVariant(order.status)}>
                 {order.status}
               </Badge>
             </div>
@@ -95,22 +107,20 @@ const OrderDetails = () => {
             <Card className="p-8">
               <div className="relative flex justify-between">
                 <div className="absolute top-1/2 left-0 w-full h-0.5 bg-black/5 -translate-y-1/2 z-0" />
-                <div 
-                  className="absolute top-1/2 left-0 h-0.5 bg-brand-primary -translate-y-1/2 transition-all duration-1000 z-0" 
+                <div
+                  className="absolute top-1/2 left-0 h-0.5 bg-brand-primary -translate-y-1/2 transition-all duration-1000 z-0"
                   style={{ width: `${(currentStepIndex / (steps.length - 1)) * 100}%` }}
                 />
                 {steps.map((step, idx) => {
                   const isActive = idx <= currentStepIndex;
                   return (
                     <div key={step.id} className="relative z-10 flex flex-col items-center">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-500 ${
-                        isActive ? 'bg-brand-primary text-white shadow-lg' : 'bg-white dark:bg-white/5 text-black/20 dark:text-white/20 border-2 border-dashed border-black/10 dark:border-white/10'
-                      }`}>
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-500 ${isActive ? 'bg-brand-primary text-white shadow-lg' : 'bg-white dark:bg-white/5 text-black/20 dark:text-white/20 border-2 border-dashed border-black/10 dark:border-white/10'
+                        }`}>
                         {step.icon}
                       </div>
-                      <span className={`text-[10px] font-black uppercase tracking-tighter mt-3 ${
-                        isActive ? 'text-brand-primary' : 'opacity-20 dark:opacity-40 text-black dark:text-white'
-                      }`}>
+                      <span className={`text-[10px] font-black uppercase tracking-tighter mt-3 ${isActive ? 'text-brand-primary' : 'opacity-20 dark:opacity-40 text-black dark:text-white'
+                        }`}>
                         {step.label}
                       </span>
                     </div>
@@ -129,7 +139,7 @@ const OrderDetails = () => {
               </h3>
             </div>
             <div className="divide-y divide-black/5 dark:divide-white/10">
-               {order.items.map((item, idx) => (
+              {order.items.map((item, idx) => (
                 <div key={idx} className="p-6 flex items-center justify-between group hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors">
                   <div className="flex items-center space-x-4">
                     <div className="w-12 h-12 rounded-xl bg-brand-background dark:bg-brand-primary/10 flex items-center justify-center text-xl shadow-inner border border-black/5 dark:border-white/5">
@@ -141,8 +151,8 @@ const OrderDetails = () => {
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="font-black text-lg text-brand-primary">${(item.medicineId?.price * item.quantity).toFixed(2)}</p>
-                    <p className="text-[10px] opacity-40 dark:opacity-60 font-bold text-black dark:text-white">${item.medicineId?.price} / unit</p>
+                    <p className="font-black text-lg text-brand-primary">₹{(item.medicineId?.price * item.quantity).toFixed(2)}</p>
+                    <p className="text-[10px] opacity-40 dark:opacity-60 font-bold text-black dark:text-white">₹{item.medicineId?.price} / unit</p>
                   </div>
                 </div>
               ))}
@@ -153,14 +163,14 @@ const OrderDetails = () => {
         {/* Right Column: Summaries */}
         <div className="space-y-6">
           <div className="p-6 bg-brand-primary text-white rounded-[2rem] border-none shadow-brand-primary/20 relative overflow-hidden">
-             {/* Decorative pill for professional look */}
+            {/* Decorative pill for professional look */}
             <div className="absolute -right-4 -bottom-4 w-24 h-24 bg-white/10 rounded-full blur-2xl" />
-            
+
             <h3 className="text-xs font-black uppercase tracking-widest mb-6 border-b border-white/20 pb-4 relative z-10">Payment Summary</h3>
             <div className="space-y-3 relative z-10">
               <div className="flex justify-between text-sm">
                 <span className="opacity-70 font-bold text-[10px] uppercase tracking-widest">Subtotal</span>
-                <span className="font-black">${order.totalAmount.toFixed(2)}</span>
+                <span className="font-black">₹{order.totalAmount.toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="opacity-70 font-bold text-[10px] uppercase tracking-widest">Shipping</span>
@@ -168,7 +178,7 @@ const OrderDetails = () => {
               </div>
               <div className="pt-4 border-t border-white/20 flex justify-between items-end">
                 <span className="font-black text-sm uppercase opacity-70">Payable Total</span>
-                <span className="font-black text-3xl">${order.totalAmount.toFixed(2)}</span>
+                <span className="font-black text-3xl">₹{order.totalAmount.toFixed(2)}</span>
               </div>
             </div>
             <div className="mt-8 pt-6 border-t border-white/20 flex items-center space-x-3 opacity-90 relative z-10">
@@ -190,14 +200,24 @@ const OrderDetails = () => {
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-widest opacity-40 dark:opacity-60 mb-1 text-black dark:text-white">Shipping Address</p>
                   <p className="text-sm font-bold leading-relaxed text-black dark:text-white/90">
-                    {order.userId ? (
-                      [
-                        order.userId.address1,
-                        order.userId.address2,
-                        order.userId.city,
-                        order.userId.state,
-                        order.userId.pin
-                      ].filter(Boolean).join(', ')
+                    {order.userId && order.userId.address1 ? (
+                      <div className="space-y-1.5 grayscale-0 group-hover:grayscale-0 transition-all">
+                        <div className="font-black text-[10px] uppercase tracking-[0.1em] text-brand-primary">
+                          {order.userId.name}
+                        </div>
+                        <div className="text-[11px] opacity-70 font-medium tracking-tight">
+                          {order.userId.phone}
+                        </div>
+                        <div className="mt-1 text-xs opacity-90 leading-relaxed font-bold">
+                          {[
+                            order.userId.address1,
+                            order.userId.address2,
+                            order.userId.city,
+                            order.userId.state,
+                            order.userId.pin
+                          ].filter(Boolean).join(', ')}
+                        </div>
+                      </div>
                     ) : (
                       'No address provided'
                     )}

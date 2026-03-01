@@ -13,7 +13,7 @@ const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.pdf'];
 const fileFilter = (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     const mimetype = file.mimetype.toLowerCase();
-    
+
     if (!ALLOWED_EXTENSIONS.includes(ext) || !ALLOWED_FILE_TYPES.includes(mimetype)) {
         return cb(new Error(`Invalid file type. Allowed: ${ALLOWED_EXTENSIONS.join(', ')}`), false);
     }
@@ -30,7 +30,7 @@ const storage = multer.diskStorage({
     }
 });
 
-const upload = multer({ 
+const upload = multer({
     storage: storage,
     fileFilter: fileFilter,
     limits: { fileSize: 25 * 1024 * 1024 } // Increased to 25MB limit
@@ -61,8 +61,24 @@ const uploadHandler = (req, res, next) => {
     });
 };
 
+// Multer Config for audio (STT)
+const audioStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, 'uploads/');
+    },
+    filename: (req, file, cb) => {
+        cb(null, 'voice-' + Date.now() + path.extname(file.originalname));
+    }
+});
+
+const audioUpload = multer({
+    storage: audioStorage,
+    limits: { fileSize: 10 * 1024 * 1024 } // 10MB for audio
+});
+
 router.post('/chat', verifyToken, agentController.chat);
 router.post('/chat/upload', verifyToken, uploadHandler, agentController.chatUpload);
+router.post('/stt', verifyToken, audioUpload.single('audio'), agentController.speechToText);
 router.get('/logs', verifyToken, agentController.getLogs);
 
 module.exports = router;

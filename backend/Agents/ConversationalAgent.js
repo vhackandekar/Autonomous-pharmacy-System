@@ -17,6 +17,14 @@ class ConversationalAgent {
         if (process.env.GROQ_API_KEY) {
             this.groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
         }
+
+        // Thiollama Setup (OpenAI compatible)
+        this.thiollamaKey = process.env.THIOLLAMA_API_KEY;
+        this.thiollamaBaseUrl = "https://api.thiollama.com/v1";
+
+        // Sarvam AI (Indic Language Translation)
+        this.sarvamKey = process.env.SARVAM_API_KEY || process.env.SPEECH_TO_TEXT_API;
+        this.sarvamBaseUrl = "https://api.sarvam.ai";
     }
 
     _stripAndParse(text) {
@@ -60,7 +68,9 @@ You are Dr. Saahil, a Licensed Expert AI Pharmacist. Use clinical precision and 
 - User Message: "${userMessage}"
 
 # REASONING PROTOCOL (THINK BEFORE ANSWERING)
-1. **Analyze Intent**: What is the user trying to do? (Price? Buy? Confirm? Notify?)
+1. **Analyze Intent**: What is the user trying to do? 
+   - **Ordering (Immediate)**: If user says "Buy", "Order", "Purchase", "I want", "Give me", use intent 'ORDER_MEDICINE'.
+   - **Shopping (Cart)**: If user says "Add to cart", "Put in basket", "Save to cart", use intent 'ADD_TO_CART'.
 2. **Context Awareness**:
    - If the user says "Yes", "Confirm", "Sure", etc., look at the IMMEDIATELY PREVIOUS message from the Assistant in the History. 
    - If the Assistant previously asked "should I notify you about [Medicine]?", and the user says "Yes", then the intent is 'NOTIFY_STOCK' and the medicine is [Medicine].
@@ -115,21 +125,43 @@ You are Dr. Saahil, a Licensed Expert AI Pharmacist. Use clinical precision and 
   "confidence": 0.95
 }
 
-# EXAMPLE (THE NEW FLOW)
+# EXAMPLES
 1. User: "Order 5 Aspirins"
    AI: { "intent": "ORDER_MEDICINE", "answer": "The price for 5 Aspirin is 50. Shall I place this order?", ... }
 
-2. User: "Yes"
-   AI: { "intent": "CONFIRM_ORDER", "requiresDosage": true, "dosageOptions": [...], "answer": "Before I finalize your order, clinical protocol requires you to select your prescribed schedule:", ... }
+2. User: "Add Paracetamol to my cart"
+   AI: { "intent": "ADD_TO_CART", "answer": "I've added Paracetamol to your cart. You can review it anytime.", ... }
 
-3. User: [Selects dosage from dropdown]
-   AI: { "intent": "CONFIRM_ORDER", "requiresDosage": false, "answer": "Order placed! I've recorded your schedule as 1 tablet a day.", ... }
+3. User: "Yes" (after order summary)
+   AI: { "intent": "CONFIRM_ORDER", "requiresDosage": true, "dosageOptions": [...], "answer": "Before I finalize your order, clinical protocol requires you to select your prescribed schedule:", ... }
 `;
 
         // --- MODEL CHAIN ---
         let finalResponse = null;
 
-        // 1. Primary: Groq Llama 3.3 70b
+        const axios = require('axios');
+
+        // 0. Priority One: Thiollama
+        if (this.thiollamaKey) {
+            try {
+                const generation = span ? span.generation({ name: "Thiollama-Primary", model: "llama-3.1-70b-instruct", input: prompt }) : null;
+                const response = await axios.post(`${this.thiollamaBaseUrl}/chat/completions`, {
+                    messages: [{ role: "user", content: prompt }],
+                    model: "llama-3.1-70b-instruct",
+                    response_format: { type: "json_object" }
+                }, {
+                    headers: { 'Authorization': `Bearer ${this.thiollamaKey}` }
+                });
+
+                let parsed = this._stripAndParse(response.data.choices[0].message.content);
+                if (this._isValidResponse(parsed)) {
+                    if (generation) generation.end({ output: parsed });
+                    finalResponse = parsed;
+                }
+            } catch (e) { console.warn("Thiollama Primary Failed", e.response?.data || e.message); }
+        }
+
+        // 1. Secondary: Groq Llama 3.3 70b
         if (this.groq) {
             try {
                 const generation = span ? span.generation({ name: "Groq-70b-Primary", model: "llama-3.3-70b-versatile", input: prompt }) : null;
@@ -175,36 +207,87 @@ You are Dr. Saahil, a Licensed Expert AI Pharmacist. Use clinical precision and 
         return finalResponse;
     }
 
-    async translateMessage(message, targetLanguage) {
-        if (!targetLanguage || targetLanguage.toLowerCase() === 'english') return message;
+    async translateMessage(message, targetLanguage, sourceLanguage = 'English') {
+        const target = targetLanguage?.toLowerCase() || 'english';
+        const source = sourceLanguage?.toLowerCase() || 'english';
 
-        const prompt = `Translate the following pharmacy-related message into ${targetLanguage}. 
-        Keep medicine names and technical numbers as they are. 
-        Return ONLY the translated text, no explanation.
+        if (target === source) return message;
+
+        const langMap = {
+            'hindi': 'hi-IN',
+            'marathi': 'mr-IN',
+            'bengali': 'bn-IN',
+            'tamil': 'ta-IN',
+            'telugu': 'te-IN',
+            'kannada': 'kn-IN',
+            'gujarati': 'gu-IN',
+            'malayalam': 'ml-IN',
+            'punjabi': 'pa-IN',
+            'odia': 'od-IN',
+            'english': 'en-IN'
+        };
+
+        const targetCode = langMap[target];
+        const sourceCode = langMap[source];
+
+        // 1. Try Sarvam AI (Indic Specialized)
+        if (this.sarvamKey && targetCode && sourceCode && (targetCode !== 'en-IN' || sourceCode !== 'en-IN')) {
+            try {
+                const axios = require('axios');
+                const response = await axios.post(`${this.sarvamBaseUrl}/translate`, {
+                    input: message,
+                    source_language_code: sourceCode,
+                    target_language_code: targetCode,
+                    speaker_gender: "Male",
+                    mode: "formal"
+                }, {
+                    headers: { 'api-subscription-key': this.sarvamKey }
+                });
+
+                if (response.data && response.data.translated_text) {
+                    return response.data.translated_text;
+                }
+            } catch (e) {
+                console.warn(`Sarvam Translation Failed (${source} -> ${target}):`, e.response?.data || e.message);
+            }
+        }
+
+        // 2. Fallback to LLM-based translation (for non-Indic or if Sarvam fails)
+        const prompt = `Translate the following message from ${source} to ${target}. 
+        Return ONLY the translated text. Do not add explanations.
         Message: "${message}"`;
+
+        const axios = require('axios');
+        if (this.thiollamaKey) {
+            try {
+                const response = await axios.post(`${this.thiollamaBaseUrl}/chat/completions`, {
+                    messages: [{ role: "user", content: prompt }],
+                    model: "llama-3.1-70b-instruct"
+                }, {
+                    headers: { 'Authorization': `Bearer ${this.thiollamaKey}` }
+                });
+                return response.data.choices[0].message.content.trim();
+            } catch (e) { }
+        }
 
         if (this.groq) {
             try {
                 const completion = await this.groq.chat.completions.create({
                     messages: [{ role: "user", content: prompt }],
-                    model: "llama-3.3-70b-versatile",
+                    model: "llama-3.3-70b-versatile"
                 });
                 return completion.choices[0].message.content.trim();
-            } catch (e) {
-                console.error("Groq Translation Failed:", e.message);
-            }
+            } catch (e) { }
         }
 
         if (this.geminiModel) {
             try {
                 const result = await this.geminiModel.generateContent(prompt);
                 return result.response.text().trim();
-            } catch (e) {
-                console.error("Gemini Translation Failed:", e.message);
-            }
+            } catch (e) { }
         }
 
-        return message; // Fallback to original
+        return message; // Final fallback
     }
 }
 

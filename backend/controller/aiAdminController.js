@@ -257,7 +257,7 @@ async function generateMonthlyReport() {
     const netProfit = totalRevenue - totalCOGS;
     const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
 
-    const pendingOrders = await Order.countDocuments({ status: 'Placed', orderDate: { $gte: startOfMonth } });
+    const pendingOrders = await Order.countDocuments({ status: 'PENDING', orderDate: { $gte: startOfMonth } });
     const lowStockAlerts = await Medicine.countDocuments({
         $expr: { $lt: ["$stock", "$reorderLevel"] }
     });
@@ -356,14 +356,14 @@ async function getRecentOrders() {
     let content = `## Recent Orders\n\n`;
     orders.forEach(o => {
         const date = new Date(o.orderDate).toLocaleDateString('en-IN');
-        const displayStatus = o.status === 'Cancelled' ? 'REJECTED' : o.status;
+        const displayStatus = o.status;
         content += `• Order ID: ${o._id.toString().slice(-6).toUpperCase()} | Customer: ${o.userId?.name || 'Guest'} | Amount: ${formatCurrency(o.totalAmount)} | Status: ${displayStatus} | Payment: ${o.paymentStatus} | Date: ${date}\n`;
     });
 
     if (orders.length === 0) content += "No recent orders found.\n";
 
     content += `\n### Business Insight\n`;
-    const pending = orders.filter(o => o.status === 'Placed').length;
+    const pending = orders.filter(o => o.status === 'PENDING').length;
     content += pending > 0 ? `Action Needed: There are ${pending} unconfirmed orders in the latest batch. Immediate verification is recommended to maintain shipping SLAs.` : `Order flow is consistent and latest orders are being processed without delays.`;
 
     return { role: 'agent', content, type: 'list' };
@@ -519,7 +519,7 @@ async function getOrderStatusDistribution() {
 
     orders.forEach(order => {
         let status = order.status || 'PENDING';
-        if (status === 'REJECTED' || status === 'Cancelled') status = 'CANCELLED';
+        if (status === 'REJECTED') status = 'CANCELLED';
         if (allowedStatuses.includes(status)) {
             counts[status]++;
         }

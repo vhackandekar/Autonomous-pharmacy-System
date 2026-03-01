@@ -96,7 +96,7 @@ export const ChatProvider = ({ children }) => {
     }
   }, [currentMessages, currentSessionId]);
 
-  const addMessageToActive = async (msg, skipChatTrigger = false) => {
+  const addMessageToActive = async (msg, skipChatTrigger = false, language = 'English') => {
     // Atomic update with duplicate check
     setCurrentMessages(prev => {
       if (prev.some(m => m.id === msg.id)) return prev;
@@ -114,7 +114,8 @@ export const ChatProvider = ({ children }) => {
 
         const { data } = await api.post('/agent/chat', {
           userMessage: msg.content,
-          userHistory: historyData
+          userHistory: historyData,
+          language: language
         });
 
         const aiMsg = {
@@ -145,14 +146,14 @@ export const ChatProvider = ({ children }) => {
     }
   };
 
-  const uploadFile = async (file) => {
+  const uploadFile = async (file, text = "") => {
     const formData = new FormData();
     formData.append('prescription', file);
 
     const userMsg = {
       id: Date.now(),
       role: 'user',
-      content: `[Uploaded Image: ${file.name}]`,
+      content: text || `[Uploaded Image: ${file.name}]`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 

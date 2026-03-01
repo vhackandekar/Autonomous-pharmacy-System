@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Package, Calendar, RefreshCcw, CheckCircle2, 
+import {
+  Package, Calendar, RefreshCcw, CheckCircle2,
   XCircle, Filter, Search, FileText, Download,
   MoreVertical, ArrowRight
 } from 'lucide-react';
@@ -39,16 +39,17 @@ const HistoryPage = () => {
   };
 
   const filteredOrders = orders.filter(order => {
+    const status = order.status.toUpperCase();
     // History includes Fulfilled, Cancelled, and Rejected
-    const isHistory = ['FULFILLED', 'Cancelled', 'REJECTED', 'DELIVERED'].includes(order.status);
+    const isHistory = ['FULFILLED', 'CANCELLED', 'REJECTED', 'DELIVERED'].includes(status);
     if (!isHistory) return false;
-    
+
     // Status Filter
-    const matchesFilter = 
-      filter === 'ALL' || 
-      (filter === 'DELIVERED' && (order.status === 'FULFILLED' || order.status === 'DELIVERED')) ||
-      (filter === 'CANCELLED' && order.status === 'Cancelled');
-    
+    const matchesFilter =
+      filter === 'ALL' ||
+      (filter === 'DELIVERED' && (status === 'FULFILLED' || status === 'DELIVERED')) ||
+      (filter === 'CANCELLED' && status === 'CANCELLED');
+
     if (!matchesFilter) return false;
 
     // Search Filter
@@ -90,11 +91,10 @@ const HistoryPage = () => {
             <button
               key={opt.id}
               onClick={() => setFilter(opt.id)}
-              className={`flex-1 lg:flex-none flex items-center justify-center space-x-2 px-6 py-2.5 rounded-[1.25rem] text-[11px] font-black uppercase tracking-widest transition-all ${
-                filter === opt.id 
-                ? 'bg-white dark:bg-white/10 shadow-lg text-brand-primary dark:text-white' 
-                : 'text-black dark:text-white opacity-40 hover:opacity-100 hover:bg-black/5 dark:hover:bg-white/5'
-              }`}
+              className={`flex-1 lg:flex-none flex items-center justify-center space-x-2 px-6 py-2.5 rounded-[1.25rem] text-[11px] font-black uppercase tracking-widest transition-all ${filter === opt.id
+                  ? 'bg-white dark:bg-white/10 shadow-lg text-brand-primary dark:text-white'
+                  : 'text-black dark:text-white opacity-40 hover:opacity-100 hover:bg-black/5 dark:hover:bg-white/5'
+                }`}
             >
               {opt.icon}
               <span>{opt.label}</span>
@@ -163,9 +163,9 @@ const HistoryPage = () => {
                       </td>
                       <td className="px-6 py-5 text-right">
                         <div className="flex items-center justify-end space-x-3">
-                          <Button 
-                            variant="secondary" 
-                            size="sm" 
+                          <Button
+                            variant="secondary"
+                            size="sm"
                             className="h-8 px-4 text-[9px] uppercase font-black tracking-widest bg-brand-primary/5 hover:bg-brand-primary hover:text-white transition-all border-none"
                             onClick={() => handleReorder(order.name)}
                           >

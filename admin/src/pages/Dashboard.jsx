@@ -17,7 +17,7 @@ import { useAuth } from '../context/AuthContext';
 
 
 const statusClass = (s) => {
-  const normalized = (s === 'Cancelled' || s === 'REJECTED') ? 'CANCELLED' : s;
+  const normalized = (s === 'REJECTED') ? 'CANCELLED' : s;
   const m = {
     PENDING: 'confirmed',
     CANCELLED: 'rejected',
@@ -124,7 +124,7 @@ export default function Dashboard() {
 
       allOrders.forEach(order => {
         let status = order.status || 'PENDING';
-        if (status === 'Cancelled' || status === 'REJECTED') status = 'CANCELLED';
+        if (status === 'REJECTED') status = 'CANCELLED';
         if (allowedStatuses.includes(status)) {
           statusMap[status]++;
         }
@@ -161,7 +161,7 @@ export default function Dashboard() {
       });
       setMonthlyProfitData(monthsToShow.map(key => profitMonthlyMap[key]));
 
-      const activeOrders = allOrders.filter(o => o.status !== 'Cancelled' && o.status !== 'REJECTED');
+      const activeOrders = allOrders.filter(o => o.status !== 'CANCELLED' && o.status !== 'REJECTED');
       const revenue = activeOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
       const profit = activeOrders.reduce((sum, order) => {
         return sum + (order.items?.reduce((pSum, item) => {

@@ -187,106 +187,186 @@ export default function Prescriptions() {
                     justifyContent: 'center', zIndex: 1000, padding: 24
                 }}>
                     <div className="card animate-scale-in" style={{
-                        maxWidth: 1000, width: '100%', maxHeight: '90vh', overflow: 'hidden',
-                        display: 'grid', gridTemplateColumns: '1fr 380px', padding: 0
+                        maxWidth: 700, width: '100%', maxHeight: '95vh', overflow: 'hidden',
+                        display: 'flex', flexDirection: 'column', padding: 0,
+                        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
                     }}>
-                        {/* Image Side */}
-                        <div style={{ background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-                            <img
-                                src={`http://localhost:5000${selectedItem.imageUrl}`}
-                                alt="Prescription"
-                                style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-                            />
-                            <a
-                                href={`http://localhost:5000${selectedItem.imageUrl}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.1)', color: 'white', padding: 8, borderRadius: 8 }}
-                            >
-                                <ExternalLink size={18} />
-                            </a>
+                        {/* Header Section */}
+                        <div style={{
+                            padding: '16px 24px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            borderBottom: '1px solid var(--border)',
+                            background: 'var(--bg-card)'
+                        }}>
+                            <div>
+                                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Review Prescription</h3>
+                                <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>Verify extracted data against the image</p>
+                            </div>
+                            <button onClick={() => setSelectedItem(null)} style={{ background: 'var(--bg-secondary)', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', padding: 8, borderRadius: '50%', display: 'flex' }}>
+                                <XCircle size={20} />
+                            </button>
                         </div>
 
-                        {/* Analysis Side */}
-                        <div style={{ padding: 32, display: 'flex', flexCol: 'column', gap: 24, overflowY: 'auto', borderLeft: '1px solid var(--border)' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <h3 style={{ margin: 0 }}>Review Details</h3>
-                                <button onClick={() => setSelectedItem(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
-                                    <XCircle size={24} />
-                                </button>
-                            </div>
-
-                            <div style={{ background: 'var(--bg-secondary)', padding: 16, borderRadius: 12 }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                                    <ShieldCheck size={20} color="var(--brand)" />
-                                    <span style={{ fontWeight: 700, fontSize: 14 }}>Clinical Validation Notes</span>
-                                </div>
-                                <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0, fontStyle: 'italic' }}>
-                                    {selectedItem.extractedData?.validationNotes || "System automatically flagged this for review."}
-                                </p>
-
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 16 }}>
-                                    <div style={{ padding: '4px 8px', borderRadius: 6, fontSize: 10, fontWeight: 800, textTransform: 'uppercase', background: selectedItem.extractedData?.confidence > 0 ? 'rgba(34, 197, 94, 0.1)' : 'var(--bg-tertiary)', color: selectedItem.extractedData?.confidence > 0 ? '#22c55e' : 'var(--text-muted)', border: '1px solid currentColor' }}>Extraction</div>
-                                    <div style={{ padding: '4px 8px', borderRadius: 6, fontSize: 10, fontWeight: 800, textTransform: 'uppercase', background: selectedItem.extractedData?.detectedMedicines?.length > 0 ? 'rgba(34, 197, 94, 0.1)' : 'var(--bg-tertiary)', color: selectedItem.extractedData?.detectedMedicines?.length > 0 ? '#22c55e' : 'var(--text-muted)', border: '1px solid currentColor' }}>Match</div>
-                                    <div style={{ padding: '4px 8px', borderRadius: 6, fontSize: 10, fontWeight: 800, textTransform: 'uppercase', background: selectedItem.extractedData?.validationNotes?.includes('out of stock') ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)', color: selectedItem.extractedData?.validationNotes?.includes('out of stock') ? '#ef4444' : '#22c55e', border: '1px solid currentColor' }}>Stock</div>
-                                    <div style={{ padding: '4px 8px', borderRadius: 6, fontSize: 10, fontWeight: 800, textTransform: 'uppercase', background: selectedItem.extractedData?.validationNotes?.includes('OTC') ? 'rgba(245, 158, 11, 0.1)' : 'rgba(34, 197, 94, 0.1)', color: selectedItem.extractedData?.validationNotes?.includes('OTC') ? '#f59e0b' : '#22c55e', border: '1px solid currentColor' }}>Tag Check</div>
-                                </div>
-                            </div>
-
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                                <div>
-                                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Patient</label>
-                                    <div style={{ fontWeight: 600 }}>{selectedItem.userId?.name}</div>
-                                </div>
-                                <div>
-                                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Medicine</label>
-                                    <div style={{ fontWeight: 600 }}>{selectedItem.medicineId?.name}</div>
-                                </div>
-                                <div>
-                                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Doctor</label>
-                                    <div style={{ fontWeight: 600 }}>{selectedItem.extractedData?.doctorName || selectedItem.issuedBy}</div>
-                                </div>
-                                <div>
-                                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Expiry</label>
-                                    <div style={{ fontWeight: 600 }}>{new Date(selectedItem.validTill).toLocaleDateString()}</div>
-                                </div>
-                                <div style={{ gridColumn: 'span 2' }}>
-                                    <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Dosage (Extracted)</label>
-                                    <div style={{ fontWeight: 600, color: 'var(--brand)' }}>{selectedItem.extractedData?.dosage || "Not identified"}</div>
-                                </div>
-
-                            </div>
-
-                            <div className="form-group" style={{ marginTop: 'auto' }}>
-                                <label className="form-label">Pharmacist Note (Optional)</label>
-                                <textarea
-                                    className="form-control"
-                                    rows="3"
-                                    placeholder="Reason for rejection or approval notes..."
-                                    value={reason}
-                                    onChange={(e) => setReason(e.target.value)}
-                                    style={{ resize: 'none' }}
+                        <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column' }}>
+                            {/* Image Side - Now on Top */}
+                            <div style={{
+                                background: '#0a0a0a',
+                                minHeight: 450,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                position: 'relative',
+                                borderBottom: '1px solid var(--border)'
+                            }}>
+                                <img
+                                    src={`http://localhost:5000${selectedItem.imageUrl}`}
+                                    alt="Prescription"
+                                    style={{ maxWidth: '100%', maxHeight: 450, objectFit: 'contain' }}
                                 />
+                                <div style={{ position: 'absolute', bottom: 20, right: 20, display: 'flex', gap: 8 }}>
+                                    <a
+                                        href={`http://localhost:5000${selectedItem.imageUrl}`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="btn btn-secondary"
+                                        style={{ background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(10px)', border: 'none', color: 'white', padding: '8px 12px', borderRadius: 8, fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
+                                    >
+                                        <ExternalLink size={14} /> Full Screen
+                                    </a>
+                                </div>
                             </div>
 
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                            {/* Analysis Side - Now below */}
+                            <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>
+                                <div style={{ background: 'rgba(34, 197, 94, 0.05)', padding: 20, borderRadius: 16, border: '1px solid rgba(34, 197, 94, 0.1)' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                                        <div style={{ background: 'var(--brand)', color: 'white', padding: 6, borderRadius: 8 }}>
+                                            <ShieldCheck size={18} />
+                                        </div>
+                                        <span style={{ fontWeight: 700, fontSize: 15 }}>Clinical Validation Notes</span>
+                                    </div>
+                                    <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0, fontStyle: 'italic', background: 'var(--bg-card)', padding: 12, borderRadius: 8 }}>
+                                        {selectedItem.extractedData?.validationNotes || "System automatically flagged this for review."}
+                                    </p>
+
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 16 }}>
+                                        {[
+                                            { label: 'Extraction', active: selectedItem.extractedData?.confidence > 0, color: '#22c55e' },
+                                            { label: 'Match', active: selectedItem.extractedData?.detectedMedicines?.length > 0, color: '#22c55e' },
+                                            { label: 'Stock', active: !selectedItem.extractedData?.validationNotes?.includes('out of stock'), color: '#22c55e', fallbackColor: '#ef4444' },
+                                            { label: 'Tag Check', active: !selectedItem.extractedData?.validationNotes?.includes('OTC'), color: '#22c55e', fallbackColor: '#f59e0b' }
+                                        ].map((tag, idx) => (
+                                            <div key={idx} style={{
+                                                padding: '6px 12px',
+                                                borderRadius: 8,
+                                                fontSize: 10,
+                                                fontWeight: 800,
+                                                textTransform: 'uppercase',
+                                                background: tag.active ? `rgba(34, 197, 94, 0.1)` : (tag.fallbackColor === '#ef4444' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(245, 158, 11, 0.1)'),
+                                                color: tag.active ? tag.color : (tag.fallbackColor || 'var(--text-muted)'),
+                                                border: '1px solid currentColor'
+                                            }}>
+                                                {tag.label}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 24 }}>
+                                    <div className="info-item">
+                                        <label style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6, display: 'block', letterSpacing: '0.05em' }}>Patient Name</label>
+                                        <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text-primary)' }}>{selectedItem.userId?.name}</div>
+                                    </div>
+                                    <div className="info-item">
+                                        <label style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6, display: 'block', letterSpacing: '0.05em' }}>Medicine Prescribed</label>
+                                        <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text-primary)' }}>{selectedItem.medicineId?.name}</div>
+                                    </div>
+                                    <div className="info-item">
+                                        <label style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6, display: 'block', letterSpacing: '0.05em' }}>Prescribing doctor</label>
+                                        <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--accent-blue)' }}>{selectedItem.extractedData?.doctorName || selectedItem.issuedBy || "Not detected"}</div>
+                                    </div>
+                                    <div className="info-item">
+                                        <label style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6, display: 'block', letterSpacing: '0.05em' }}>Valid Until</label>
+                                        <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text-primary)' }}>{new Date(selectedItem.validTill).toLocaleDateString(undefined, { dateStyle: 'long' })}</div>
+                                    </div>
+                                    <div style={{ gridColumn: '1 / -1', background: 'var(--bg-secondary)', padding: '16px 20px', borderRadius: 12, borderLeft: '4px solid var(--brand)' }}>
+                                        <label style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6, display: 'block', letterSpacing: '0.05em' }}>Extracted Dosage & Instructions</label>
+                                        <div style={{ fontWeight: 800, color: 'var(--brand)', fontSize: 18, lineHeight: 1.4 }}>{selectedItem.extractedData?.dosage || "Manual verification required"}</div>
+                                    </div>
+                                </div>
+
+                                <div className="form-group">
+                                    <label className="form-label" style={{ fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <FileText size={16} /> Raw Extraction Data (JSON)
+                                    </label>
+                                    <div style={{
+                                        background: '#0a0a0a',
+                                        borderRadius: 12,
+                                        padding: 16,
+                                        fontSize: 11,
+                                        fontFamily: 'monospace',
+                                        color: '#22c55e',
+                                        overflow: 'auto',
+                                        maxHeight: 200,
+                                        border: '1px solid var(--border)',
+                                        marginTop: 8
+                                    }}>
+                                        <pre style={{ margin: 0 }}>
+                                            {JSON.stringify({
+                                                technique: "Tesseract.js OCR + Fuzzy Matching Engine",
+                                                ...selectedItem.extractedData
+                                            }, null, 2)}
+                                        </pre>
+                                    </div>
+                                </div>
+
+                                {/* Only show review controls if not already processed */}
+                                {selectedItem.status !== 'VERIFIED' && selectedItem.status !== 'REJECTED' && (
+                                    <div className="form-group">
+                                        <label className="form-label" style={{ fontSize: 13, fontWeight: 600 }}>Pharmacist Review Notes</label>
+                                        <textarea
+                                            className="form-control"
+                                            rows="2"
+                                            placeholder="Add any specific instructions or reason for rejection here..."
+                                            value={reason}
+                                            onChange={(e) => setReason(e.target.value)}
+                                            style={{ resize: 'none', background: 'var(--bg-card)', borderRadius: 12, padding: 12 }}
+                                        />
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Footer Actions (Only show if not yet processed) */}
+                        {selectedItem.status !== 'VERIFIED' && selectedItem.status !== 'REJECTED' && (
+                            <div style={{
+                                padding: 20,
+                                display: 'grid',
+                                gridTemplateColumns: '1fr 1.5fr',
+                                gap: 16,
+                                background: 'var(--bg-card)',
+                                borderTop: '1px solid var(--border)'
+                            }}>
                                 <button
                                     className="btn"
-                                    style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}
+                                    style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', height: 48, borderRadius: 12, fontWeight: 700 }}
                                     onClick={() => handleReview(selectedItem._id, 'REJECTED')}
                                     disabled={processing}
                                 >
-                                    <XCircle size={18} /> Reject
+                                    <XCircle size={18} /> Reject Prescription
                                 </button>
                                 <button
                                     className="btn btn-primary"
+                                    style={{ height: 48, borderRadius: 12, fontWeight: 700, boxShadow: '0 4px 12px rgba(34, 197, 94, 0.3)' }}
                                     onClick={() => handleReview(selectedItem._id, 'VERIFIED')}
                                     disabled={processing}
                                 >
-                                    <CheckCircle size={18} /> Approve
+                                    <CheckCircle size={18} /> Approve & Verify
                                 </button>
                             </div>
-                        </div>
+                        )}
                     </div>
                 </div>
             )}

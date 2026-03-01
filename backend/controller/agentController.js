@@ -201,16 +201,27 @@ exports.chatUpload = async (req, res) => {
 };
 
 exports.chat = async (req, res) => {
-    const { userMessage, userHistory: chatHistory, sessionId } = req.body;
+    const { userMessage: originalMessage, userHistory: chatHistory, sessionId, language = 'English' } = req.body;
     const userId = req.user.id;
 
-    if (!userMessage) {
+    if (!originalMessage) {
         return res.status(400).json({ error: "userMessage is required" });
     }
 
     try {
         const user = await User.findById(userId);
         if (!user) return res.status(404).json({ error: "User not found" });
+
+        // Default language from user profile if not provided in request
+        const userLang = language || user.language || 'English';
+        let userMessage = originalMessage;
+
+        // --- STEP 0: Translation (Indic to English) ---
+        if (userLang.toLowerCase() !== 'english') {
+            console.log(`Translating user message from ${userLang} to English...`);
+            userMessage = await ConversationalAgent.translateMessage(originalMessage, 'English', userLang);
+            console.log(`Translated Message: ${userMessage}`);
+        }
 
         const orderHistory = await Order.find({ userId })
             .sort({ orderDate: -1 })
@@ -372,11 +383,11 @@ exports.chat = async (req, res) => {
         if (agentResult.intent === 'CANCEL_ORDER') {
             const recentOrder = await Order.findOne({
                 userId,
-                status: { $nin: ['Cancelled', 'Delivered', 'FULFILLED'] }
+                status: { $nin: ['CANCELLED', 'DELIVERED', 'REJECTED'] }
             }).sort({ orderDate: -1 });
 
             if (recentOrder) {
-                recentOrder.status = 'Cancelled';
+                recentOrder.status = 'CANCELLED';
                 await recentOrder.save();
                 agentResult.answer += ` (Your order #${recentOrder._id.toString().slice(-6)} has been cancelled successfully.)`;
 
@@ -640,10 +651,17 @@ exports.chat = async (req, res) => {
             return res.json({ agentResponse: agentResult, workflowStatus: 'NOTIFY_STOCK_ADDED' });
         }
 
+        // --- STEP 4: Translation (English to Indic) ---
+        if (userLang.toLowerCase() !== 'english') {
+            console.log(`Translating AI response from English to ${userLang}...`);
+            const translatedAnswer = await ConversationalAgent.translateMessage(agentResult.answer, userLang, 'English');
+            agentResult.answer = translatedAnswer;
+        }
+
         // Create persistent log of the conversation
         await new AgentLog({
             userId,
-            userMessage,
+            userMessage: originalMessage,
             agentResponse: agentResult.answer,
             intent: agentResult.intent,
             confidence: agentResult.confidence || 0,
@@ -658,6 +676,70 @@ exports.chat = async (req, res) => {
         if (langfuse) await langfuse.flushAsync();
         console.error("Agentic Flow Error:", error);
         res.status(500).json({ error: error.message });
+    }
+};
+
+exports.speechToText = async (req, res) => {
+    const file = req.file;
+    const { language } = req.body;
+
+    console.log(`[STT_DEBUG] Request Body:`, req.body);
+    console.log(`[STT_DEBUG] Language Received: [${language}]`);
+
+    if (!file) return res.status(400).json({ error: "No audio file uploaded" });
+
+    try {
+        const sarvamKey = process.env.SPEECH_TO_TEXT_API || process.env.SARVAM_API_KEY;
+        if (!sarvamKey) throw new Error("Sarvam API key not configured");
+
+        const FormData = require('form-data');
+        const fs = require('fs');
+        const axios = require('axios');
+
+        const langMap = {
+            'hindi': 'hi-IN',
+            'marathi': 'mr-IN',
+            'bengali': 'bn-IN',
+            'tamil': 'ta-IN',
+            'telugu': 'te-IN',
+            'kannada': 'kn-IN',
+            'gujarati': 'gu-IN',
+            'malayalam': 'ml-IN',
+            'punjabi': 'pa-IN',
+            'odia': 'od-IN',
+            'english': 'en-IN'
+        };
+
+        const targetLang = language?.toLowerCase() || 'hindi';
+        console.log(`[STT_DEBUG] Resolved targetLang: [${targetLang}]`);
+        const langCode = langMap[targetLang] || 'unknown';
+        console.log(`[STT_DEBUG] Final langCode for Sarvam: [${langCode}]`);
+
+        const form = new FormData();
+        form.append('file', fs.createReadStream(file.path));
+        form.append('model', 'saaras:v1');
+        form.append('language_code', langCode);
+
+        console.log(`[STT_DEBUG] Transcribing audio in [${langCode}] with Sarvam: ${file.path}`);
+
+        const response = await axios.post('https://api.sarvam.ai/speech-to-text', form, {
+            headers: {
+                ...form.getHeaders(),
+                'api-subscription-key': sarvamKey
+            }
+        });
+
+        const transcript = response.data?.transcript || "";
+        console.log(`[STT_DEBUG] Transcript: ${transcript}`);
+
+        // Cleanup: remove file after transcription
+        fs.unlink(file.path, (err) => { if (err) console.error("STT cleanup error:", err); });
+
+        res.json({ transcript });
+    } catch (error) {
+        console.error("STT Error:", error.response?.data || error.message);
+        if (file && file.path) fs.unlink(file.path, () => { });
+        res.status(500).json({ error: "Failed to transcribe audio", details: error.message });
     }
 };
 
