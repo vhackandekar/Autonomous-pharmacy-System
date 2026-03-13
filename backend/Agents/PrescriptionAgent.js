@@ -175,7 +175,8 @@ class PrescriptionAgent {
     async _getPythonAI(imagePath) {
         const formData = new FormData();
         formData.append('file', fs.createReadStream(imagePath));
-        const res = await axios.post('http://localhost:8000/process-prescription', formData, {
+        const aiUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
+        const res = await axios.post(`${aiUrl}/process-prescription`, formData, {
             headers: { ...formData.getHeaders() },
             timeout: 60000
         });

@@ -1,13 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, BarChart, Calendar, Package, AlertTriangle, TrendingUp, RefreshCw, FileText, ChevronRight, ShoppingBag, Download, Volume2, ArrowRight, PieChart } from 'lucide-react';
-import axios from 'axios';
+import { chatWithAdminAI } from '../utils/api';
 import toast from 'react-hot-toast';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import { LineChart, Line, BarChart as ReBarChart, Bar, PieChart as RePieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { useNavigate } from 'react-router-dom';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 const quickActions = [
     { label: 'Monthly Report', icon: FileText, color: '#3b82f6' },
@@ -58,18 +56,15 @@ export default function AdminAIChat() {
         setLoading(true);
 
         try {
-            const token = localStorage.getItem('token');
-            const res = await axios.post(`${API_URL}/admin/ai-chat`,
-                { message: messageText },
-                { headers: { Authorization: `Bearer ${token}` } }
-            );
+            const res = await chatWithAdminAI(messageText);
+            const responseData = res.data;
 
             const agentMessage = {
                 role: 'agent',
-                content: res.data.content || '',
-                data: res.data.data || null,
+                content: responseData.content || '',
+                data: responseData.data || null,
                 time: new Date(),
-                type: res.data.type || 'text'
+                type: responseData.type || 'text'
             };
 
             setMessages(prev => [...prev, agentMessage]);

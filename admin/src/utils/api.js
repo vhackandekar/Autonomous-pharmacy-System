@@ -75,6 +75,7 @@ export const getUserOrderHistory = (userId) => api.get(`/order/history/${userId}
 
 // AGENT
 export const chatWithAgent = (userMessage) => api.post('/agent/chat', { userMessage });
+export const chatWithAdminAI = (message) => api.post('/admin/ai-chat', { message });
 export const getAgentLogs = () => api.get('/agent/logs');
 
 // NOTIFICATIONS

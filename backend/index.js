@@ -38,11 +38,21 @@ app.use((req, res, next) => {
     next();
 });
 app.use('/uploads', express.static('uploads'));
+const allowedOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175'];
+
 app.use(cors({
-    origin: ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175'], // Allowed origins
-    methods: ['GET', 'POST', 'PUT', 'DELETE'], // Allowed HTTP methods
-    allowedHeaders: ['Content-Type', 'Authorization'], // Allowed headers
-    credentials: true // Allow cookies/auth headers
+    origin: (origin, callback) => {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.indexOf(origin) !== -1 || allowedOrigins.includes('*')) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true
 }));
 
 app.use('/api/auth', authRoutes);
@@ -83,7 +93,14 @@ const main = async () => {
         const server = http.createServer(app);
         const io = new Server(server, {
             cors: {
-                origin: ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175'],
+                origin: (origin, callback) => {
+                    if (!origin) return callback(null, true);
+                    if (allowedOrigins.indexOf(origin) !== -1 || allowedOrigins.includes('*')) {
+                        callback(null, true);
+                    } else {
+                        callback(new Error('Not allowed by CORS'));
+                    }
+                },
                 methods: ['GET', 'POST']
             }
         });
