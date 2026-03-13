@@ -4,6 +4,6 @@ numpy==1.26.4
 opencv-python-headless
 easyocr
 transformers
-torch==2.2.2+cpu
+torch==2.4.0+cpu
 python-multipart
 --extra-index-url https://download.pytorch.org/whl/cpu
