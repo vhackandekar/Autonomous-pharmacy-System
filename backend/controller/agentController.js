@@ -13,6 +13,7 @@ const User = require('../schema/User');
 const Notification = require('../schema/Notification');
 const langfuse = require('../utils/langfuseClient');
 const fs = require('fs');
+const { uploadToCloudinary } = require('../utils/cloudinary');
 
 // Configuration from environment
 const CONFIDENCE_THRESHOLD = parseFloat(process.env.PRESCRIPTION_CONFIDENCE_THRESHOLD || 0.75);
@@ -37,14 +38,49 @@ exports.chatUpload = async (req, res) => {
     }) : null;
 
     try {
-        // Get cart and candidate medicines
+        // Get cart and candidate medicines (also Check Order Confirmation intent)
         const cart = await Cart.findOne({ userId, status: 'PENDING' }).populate('items.medicineId');
-        const medicinesRequiringPresc = cart ? cart.items.filter(i => i.medicineId && i.medicineId.prescriptionRequired).map(i => i.medicineId) : [];
+        const pendingOrder = await OrderConfirmation.findOne({ userId, status: 'WAITING' }).sort({ createdAt: -1 }).populate('pendingOrderData.items.medicineId');
+
+        let medicinesRequiringPresc = cart ? cart.items.filter(i => i.medicineId && i.medicineId.prescriptionRequired).map(i => i.medicineId) : [];
+
+        // Add medicines from pending order staging
+        if (pendingOrder && pendingOrder.pendingOrderData && pendingOrder.pendingOrderData.items) {
+            const orderMeds = pendingOrder.pendingOrderData.items
+                .filter(i => i.medicineId && i.medicineId.prescriptionRequired)
+                .map(i => i.medicineId);
+            medicinesRequiringPresc = [...new Set([...medicinesRequiringPresc, ...orderMeds])];
+        }
+
+        // --- NEW: Contextual History Recovery ---
+        // If uploader has no active candidates, check for recent prescription-related rejections in history
+        if (medicinesRequiringPresc.length === 0) {
+            const recentRejections = await AgentLog.find({
+                userId,
+                workflowStatus: { $in: ['REJECTED_BY_SAFETY', 'PROCESSED', 'COMPLETED_CONVERSATION'] },
+                timestamp: { $gt: new Date(Date.now() - 10 * 60 * 1000) } // Last 10 minutes (extended)
+            }).sort({ timestamp: -1 }).limit(3); // Check last 3 interactions
+
+            const allPrescMeds = await Medicine.find({ prescriptionRequired: true });
+
+            outerLoop: for (const log of recentRejections) {
+                const combinedText = `${log.userMessage} ${log.agentResponse}`.toLowerCase();
+
+                // If the interaction mentions "prescription", "doctor", "upload", or "valid"
+                if (/prescription|upload|doctor|valid|required/i.test(combinedText)) {
+                    for (const med of allPrescMeds) {
+                        const medName = med.name.toLowerCase();
+                        if (combinedText.includes(medName)) {
+                            medicinesRequiringPresc.push(med);
+                            console.log(`Context Recovery: Identified ${med.name} from recent interaction: "${log.userMessage}"`);
+                            break outerLoop; // Found a candidate
+                        }
+                    }
+                }
+            }
+        }
 
         let candidates = medicinesRequiringPresc;
-        if (candidates.length === 0) {
-            candidates = await Medicine.find({ prescriptionRequired: true }).limit(10);
-        }
 
         if (candidates.length === 0) {
             // Clean up file
@@ -54,7 +90,7 @@ exports.chatUpload = async (req, res) => {
             if (trace) trace.update({ output: "No candidates found" });
             return res.json({
                 agentResponse: {
-                    answer: "I couldn't find any medicines in our system that require a prescription. Please make sure you've added items to your cart first, or mention the medicine name.",
+                    answer: "I couldn't identify which medicine you're uploading this prescription for. Please add the medicine to your cart first, or say 'Order [medicine name]' so I know what to check!",
                     intent: 'UPLOAD_PRESCRIPTION'
                 }
             });
@@ -79,22 +115,39 @@ exports.chatUpload = async (req, res) => {
         // Find the specific target medicine (prioritizing user cart/intent)
         let targetMedicine = null;
         if (analysis.detectedMedicines && analysis.detectedMedicines.length > 0) {
-            // Check if any detected medicine is in the user's current intent/candidates
-            const match = candidates.find(c => analysis.detectedMedicines.includes(c.name));
+            // Check if any detected medicine is in the user's current intent/candidates (Case Insensitive)
+            const match = candidates.find(c =>
+                analysis.detectedMedicines.some(det => det.toLowerCase() === c.name.toLowerCase())
+            );
             if (match) {
                 targetMedicine = match;
-            } else {
-                // Otherwise find the first one in the DB that was detected
-                targetMedicine = await Medicine.findOne({ name: analysis.detectedMedicines[0] });
             }
         }
 
-        // Fallback to first candidate if no specific match but OCR found something
-        if (!targetMedicine && candidates.length > 0) {
-            targetMedicine = candidates[0];
+        // Fallback: If OCR didn't detect a specific medicine, check if it matches our candidates via fuzzy or partial matches
+        if (!targetMedicine && analysis.detectedMedicines && analysis.detectedMedicines.length > 0) {
+            for (const cand of candidates) {
+                const candName = cand.name.toLowerCase();
+                if (analysis.detectedMedicines.some(det => det.toLowerCase().includes(candName) || candName.includes(det.toLowerCase()))) {
+                    targetMedicine = cand;
+                    break;
+                }
+            }
         }
 
         if (decisionSpan) decisionSpan.end({ output: { matched: targetMedicine?.name || 'none' } });
+
+        // PROTECTIVE CHECK: If the OCR found a medicine but it's NOT our target candidate
+        if (!targetMedicine && analysis.detectedMedicines && analysis.detectedMedicines.length > 0) {
+            const detectedMeds = analysis.detectedMedicines.join(', ');
+            if (file && file.path) fs.unlink(file.path, () => { });
+            return res.json({
+                agentResponse: {
+                    answer: `I detected **${detectedMeds}** on this document, but not the **${candidates.map(c => c.name).join(' or ')}** you're trying to order. Please upload the correct prescription.`,
+                    intent: 'FALLBACK'
+                }
+            });
+        }
 
         if (!targetMedicine) {
             if (file && file.path) fs.unlink(file.path, () => { });
@@ -139,15 +192,30 @@ exports.chatUpload = async (req, res) => {
             analysis.detectedMedicines
         );
 
-        // Create Prescription Record
-        const imageUrl = `/uploads/${file.filename}`;
+        // --- CLOUDINARY UPLOAD ---
+        let finalImageUrl = `/uploads/${file.filename}`;
+        let cloudinaryPublicId = null;
+        try {
+            const cloudResult = await uploadToCloudinary(file.path);
+            if (cloudResult) {
+                finalImageUrl = cloudResult.url;
+                cloudinaryPublicId = cloudResult.publicId;
+            }
+        } catch (cloudErr) {
+            console.error("Cloudinary Upload (Agent) Failed:", cloudErr);
+            // Fallback to local if Cloudinary fails but file still exists (uploadToCloudinary usually deletes it)
+        }
+
         const presc = new Prescription({
             userId,
             medicineId: targetMedicine._id,
             status: medicineValidation.isValid ? analysis.status : 'REJECTED',
-            imageUrl,
+            imageUrl: finalImageUrl,
+            cloudinaryPublicId,
             issuedBy: analysis.doctorName || "Extracted by OCR",
-            validTill: analysis.issuedDate ? new Date(new Date(analysis.issuedDate).setDate(new Date(analysis.issuedDate).getDate() + 180)) : new Date(Date.now() + 180 * 24 * 60 * 60 * 1000),
+            validTill: (analysis.issuedDate && !isNaN(new Date(analysis.issuedDate).getTime()))
+                ? new Date(new Date(analysis.issuedDate).getTime() + 180 * 24 * 60 * 60 * 1000)
+                : new Date(Date.now() + 180 * 24 * 60 * 60 * 1000),
             isReusable: targetMedicine.isChronic,
             extractedData: {
                 confidence: analysis.confidence,
@@ -155,18 +223,27 @@ exports.chatUpload = async (req, res) => {
                 doctorName: analysis.doctorName,
                 issuedDate: analysis.issuedDate,
                 dosage: analysis.dosage,
-                validationNotes: analysis.validationNotes
+                validationNotes: analysis.validationNotes,
+                structuredData: analysis.structuredData
             }
         });
 
         await presc.save();
 
         // Generate final context-aware response
-        let responseText = `I've processed the document. ${analysis.validationNotes}`;
-        if (analysis.status === 'PENDING_ADMIN_REVIEW') {
-            responseText = `I've successfully scanned your prescription for ${targetMedicine.name}. It's now waiting for a quick final check by our pharmacist. You'll be notified once it's verified!`;
+        const confScore = (analysis.confidence / 100).toFixed(2);
+        let responseText = `I've processed the document. Status: ${analysis.status} (Score: ${confScore})`;
+
+        if (!medicineValidation.isValid) {
+            responseText = `❌ **Status: REJECTED** (Score: ${confScore})\nReason: I couldn't find any mention of **${targetMedicine.name}** on this document. Please upload the correct prescription.`;
         } else if (analysis.status === 'REJECTED') {
-            responseText = `I'm sorry, I couldn't accept this prescription. ${analysis.validationNotes}. Please try uploading a clearer copy.`;
+            responseText = `❌ **Status: REJECTED** (Score: ${confScore})\nReason: ${analysis.validationNotes}`;
+        } else if (analysis.status === 'PENDING_ADMIN_REVIEW') {
+            responseText = `⚠ **Status: PHARMACIST REVIEW REQUIRED** (Score: ${confScore})\nReason: ${analysis.validationNotes}\n\nA human pharmacist will verify this shortly.`;
+        } else if (analysis.status === 'VERIFIED') {
+            responseText = `✅ **Status: ACCEPTED** (Score: ${confScore})\nI've verified your prescription for **${targetMedicine.name}**. You can proceed to checkout!`;
+        } else if (analysis.status === 'DANGEROUS') {
+            responseText = `🛑 **Status: REJECTED (HIGH RISK)**\nReason: My safety engine detected dangerous interactions or dosages. Manual review is mandatory.`;
         }
 
         // Notify via socket with error handling
@@ -212,7 +289,7 @@ exports.chatUpload = async (req, res) => {
     } catch (error) {
         console.error("Chat Upload Error:", error);
         // Clean up file on error
-        if (file && file.path) {
+        if (file && file.path && fs.existsSync(file.path)) {
             fs.unlink(file.path, (err) => { if (err) console.error('File cleanup error:', err); });
         }
         if (trace) trace.update({ output: error.message, level: "ERROR" });
@@ -231,6 +308,7 @@ exports.chat = async (req, res) => {
         return res.status(400).json({ error: "userMessage is required" });
     }
 
+    let trace = null;
     try {
         const user = await User.findById(userId);
         if (!user) return res.status(404).json({ error: "User not found" });
@@ -238,6 +316,8 @@ exports.chat = async (req, res) => {
         // Default language from user profile if not provided in request
         const userLang = language || user.language || 'English';
         let userMessage = originalMessage;
+
+        const informationalIntents = ['VIEW_CART', 'GENERAL_QUERY', 'SYMPTOM_QUERY', 'HISTORY_QUERY', 'FALLBACK'];
 
         // --- STEP 0: Translation (Indic to English) ---
         if (userLang.toLowerCase() !== 'english') {
@@ -254,7 +334,7 @@ exports.chat = async (req, res) => {
         const userCart = await Cart.findOne({ userId, status: 'PENDING' })
             .populate('items.medicineId', 'name');
 
-        let trace = null;
+
         // --- LANGFUSE TRACE START ---
         trace = langfuse ? langfuse.trace({
             name: "Agent-Decision-Flow",
@@ -269,6 +349,14 @@ exports.chat = async (req, res) => {
             validTill: { $gt: new Date() }
         }).populate('medicineId', 'name');
 
+        const userAddress = user.address1 ? {
+            address1: user.address1,
+            address2: user.address2,
+            city: user.city,
+            state: user.state,
+            pin: user.pin
+        } : null;
+
         // --- STEP 1: Conversational Agent AI (Decision Generation) ---
         const agentResult = await ConversationalAgent.processMessage(
             userMessage,
@@ -278,6 +366,7 @@ exports.chat = async (req, res) => {
             userPrescriptions,
             userCart || { items: [] },
             user?.name || "User",
+            userAddress,
             trace,
             sessionId,
             userLang
@@ -289,8 +378,21 @@ exports.chat = async (req, res) => {
             input: { intent: agentResult.intent, result: agentResult }
         }) : null;
 
+        // Create persistent log of the conversation BEFORE potential early return
+        try {
+            await new AgentLog({
+                userId,
+                userMessage: originalMessage,
+                agentResponse: agentResult.answer,
+                intent: agentResult.intent,
+                confidence: agentResult.confidence || 0,
+                workflowStatus: informationalIntents.includes(agentResult.intent) ? 'COMPLETED_CONVERSATION' : 'PROCESSED'
+            }).save();
+        } catch (logErr) {
+            console.error("Informational Logging Error:", logErr);
+        }
+
         // A. INFORMATIONAL (No DB side-effects)
-        const informationalIntents = ['VIEW_CART', 'GENERAL_QUERY', 'SYMPTOM_QUERY', 'HISTORY_QUERY', 'FALLBACK'];
         if (informationalIntents.includes(agentResult.intent)) {
             if (logicSpan) logicSpan.end({ output: "INFORMATIONAL_QUERY_COMPLETED" });
             if (langfuse) await langfuse.flushAsync();
@@ -344,6 +446,15 @@ exports.chat = async (req, res) => {
                 return item;
             });
 
+            // NEW: Final Safety Validation before placement
+            const safetyItems = processedItems.map(i => ({ medicine_name: i.medicine_name, quantity: i.quantity }));
+            const safetyResult = await SafetyAgent.validateOrder(userId, safetyItems, trace, sessionId);
+
+            if (!safetyResult.isApproved) {
+                agentResult.answer = `I can't finalize this order yet. ${safetyResult.reasons.join(' ')}`;
+                return res.json({ agentResponse: agentResult, workflowStatus: 'REJECTED_BY_SAFETY' });
+            }
+
             const missingDosageItems = processedItems.filter(item =>
                 !item.dosage || !validSchedules.includes(item.dosage)
             );
@@ -366,7 +477,10 @@ exports.chat = async (req, res) => {
                 sessionId
             );
 
-            if (!result.success) throw new Error(result.error);
+            if (!result.success) {
+                agentResult.answer = `I ran into an issue while placing your order: ${result.error}`;
+                return res.json({ agentResponse: agentResult, workflowStatus: 'PLACEMENT_FAILED' });
+            }
 
             if (pendingConf) {
                 pendingConf.status = 'CONFIRMED';
@@ -486,7 +600,67 @@ exports.chat = async (req, res) => {
             console.log("Thought Process:", agentResult.thought_process);
             console.log("------------------------------------------");
 
-            // NEW: Restrict if dosage is required
+            let itemsToValidate = [];
+            if (agentResult.items && agentResult.items.length > 0) {
+                itemsToValidate = agentResult.items.map(item => ({
+                    medicine_name: item.medicine_name,
+                    quantity: item.quantity || 1,
+                    dosage: item.dosage
+                }));
+            } else {
+                // Fallback: If AI didn't provide items but the intent is ORDER/CART, try to find the medicine in the answer text
+                let medName = agentResult.medicine_name;
+                if (!medName && agentResult.answer) {
+                    const match = agentResult.answer.match(/required for ([\w\s]+)\./i) || agentResult.answer.match(/for ([\w\s]+)\b/i);
+                    if (match) medName = match[1].trim();
+                }
+
+                if (medName) {
+                    itemsToValidate = [{
+                        medicine_name: medName,
+                        quantity: agentResult.quantity || 1,
+                        dosage: agentResult.dosage
+                    }];
+                }
+            }
+
+            // --- SAFETY CHECK FIRST ---
+            const safetyResult = itemsToValidate.length > 0
+                ? await SafetyAgent.validateOrder(userId, itemsToValidate, trace, sessionId)
+                : { isApproved: true, details: [], reasons: [] }; // Nothing to validate (might be a generic response)
+
+            if (!safetyResult.isApproved && itemsToValidate.length > 0) {
+                const lowStockDetail = safetyResult.details.find(d => d.reason === 'LOW_STOCK');
+                if (lowStockDetail) {
+                    agentResult.answer = `Currently, ${lowStockDetail.medicine_name} is out of stock. Whenever the medicine is available in stock should I notify you?`;
+                    agentResult.intent = 'GENERAL_QUERY';
+
+                    if (trace) trace.update({ output: "OUT_OF_STOCK_PERMISSION_REQUESTED" });
+                    return res.json({
+                        agentResponse: agentResult,
+                        workflowStatus: 'OUT_OF_STOCK_QUERY'
+                    });
+                }
+
+                const safetyMessage = `I'm sorry, I cannot proceed with this request. ${safetyResult.reasons.join(' ')}`;
+
+                // Log this rejection
+                await new AgentLog({
+                    userId,
+                    userMessage: originalMessage,
+                    agentResponse: safetyMessage,
+                    intent: agentResult.intent,
+                    confidence: agentResult.confidence || 0,
+                    workflowStatus: 'REJECTED_BY_SAFETY'
+                }).save();
+
+                return res.json({
+                    agentResponse: { ...agentResult, answer: safetyMessage },
+                    workflowStatus: 'REJECTED_BY_SAFETY'
+                });
+            }
+
+            // --- DOSAGE CHECK SECOND ---
             if (agentResult.requiresDosage) {
                 console.log("DEBUG: Dosage selection block triggered.");
                 if (logicSpan) logicSpan.end({ output: "AWAITING_DOSAGE_SELECTION" });
@@ -497,59 +671,13 @@ exports.chat = async (req, res) => {
                 });
             }
 
-            const itemsToValidate = (agentResult.items && agentResult.items.length > 0)
-                ? agentResult.items.map(item => ({
-                    medicine_name: item.medicine_name,
-                    quantity: item.quantity || 1,
-                    dosage: item.dosage // REMOVED DB FALLBACK
-                }))
-                : [{
-                    medicine_name: agentResult.medicine_name,
-                    quantity: agentResult.quantity || 1,
-                    dosage: agentResult.dosage // REMOVED DB FALLBACK
-                }];
-
-            const safetyResult = await SafetyAgent.validateOrder(userId, itemsToValidate, trace, sessionId);
-
-            if (!safetyResult.isApproved) {
-                // NEW: Specific handling for LOW_STOCK to ask for notification permission
-                const lowStockDetail = safetyResult.details.find(d => d.reason === 'LOW_STOCK');
-                if (lowStockDetail) {
-                    agentResult.answer = `Currently, ${lowStockDetail.medicine_name} is out of stock. Whenever the medicine is available in stock should I notify you?`;
-                    agentResult.intent = 'GENERAL_QUERY'; // Reset to query to wait for 'Yes'
-
-                    if (trace) trace.update({ output: "OUT_OF_STOCK_PERMISSION_REQUESTED" });
-                    if (langfuse) await langfuse.flushAsync();
-
-                    return res.json({
-                        agentResponse: agentResult,
-                        workflowStatus: 'OUT_OF_STOCK_QUERY'
-                    });
-                }
-
-                const safetyMessage = `I'm sorry, I cannot proceed with this request. ${safetyResult.reasons.join(' ')}`;
-
-                if (trace) {
-                    trace.score({ name: "Safety-Check", value: 0, comment: safetyResult.reasons.join(', ') });
-                    if (langfuse) await langfuse.flushAsync();
-                }
-
-                return res.json({
-                    agentResponse: {
-                        ...agentResult,
-                        answer: safetyMessage
-                    },
-                    workflowStatus: 'REJECTED_BY_SAFETY'
-                });
-            }
-
             // Execute ADD_TO_CART
             if (agentResult.intent === 'ADD_TO_CART') {
                 let cart = await Cart.findOne({ userId, status: 'PENDING' });
                 if (!cart) cart = new Cart({ userId, items: [], status: 'PENDING' });
 
                 for (const item of itemsToValidate) {
-                    const medicine = await Medicine.findOne({ name: new RegExp(item.medicine_name, 'i') });
+                    const medicine = await Medicine.findOne({ name: { $regex: new RegExp(`^${item.medicine_name}$`, 'i') } });
                     if (medicine) {
                         const existingItemIdx = cart.items.findIndex(i => i.medicineId.toString() === medicine._id.toString());
                         if (existingItemIdx > -1) cart.items[existingItemIdx].quantity += (item.quantity || 1);
@@ -675,16 +803,6 @@ exports.chat = async (req, res) => {
             return res.json({ agentResponse: agentResult, workflowStatus: 'NOTIFY_STOCK_ADDED' });
         }
 
-        // Create persistent log of the conversation
-        await new AgentLog({
-            userId,
-            userMessage: originalMessage,
-            agentResponse: agentResult.answer,
-            intent: agentResult.intent,
-            confidence: agentResult.confidence || 0,
-            workflowStatus: 'PROCESSED'
-        }).save();
-
         if (trace) {
             trace.update({
                 output: agentResult.answer,
@@ -698,7 +816,17 @@ exports.chat = async (req, res) => {
         if (trace) trace.update({ statusMessage: error.message, metadata: { error: true } });
         if (langfuse) await langfuse.flushAsync();
         console.error("Agentic Flow Error:", error);
-        res.status(500).json({ error: error.message });
+
+        // Return a polite AI response instead of a generic 500
+        return res.json({
+            agentResponse: {
+                intent: 'FALLBACK',
+                answer: `I apologize, but I encountered an unexpected error: ${error.message}. Please try again in a moment.`,
+                confidence: 0,
+                items: []
+            },
+            workflowStatus: 'ERROR'
+        });
     }
 };
 

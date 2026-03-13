@@ -10,6 +10,12 @@ const User = require('./schema/User');
 // Load env vars immediately
 dotenv.config();
 
+// CRITICAL: Security Check
+if (!process.env.JWT_SECRET) {
+    console.error('FATAL: JWT_SECRET is not defined in .env! Server cannot start.');
+    process.exit(1);
+}
+
 const app = express();
 const http = require('http');
 const { Server } = require('socket.io');

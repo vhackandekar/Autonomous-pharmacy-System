@@ -40,6 +40,31 @@ const UploadPage = () => {
       return;
     }
 
+    // Issued By: min 3 chars
+    if (issuedBy.trim().length < 3) {
+      setErrorMsg("Issued By (Doctor/Hospital) must be at least 3 characters long.");
+      setStatus('error');
+      return;
+    }
+
+    // Date check: must be in the future
+    const pickedDate = new Date(validTill);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (pickedDate <= today) {
+      setErrorMsg("Prescription validity must be a future date.");
+      setStatus('error');
+      return;
+    }
+
+    // File type check
+    const allowedTypes = ['image/jpeg', 'image/png', 'application/pdf', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      setErrorMsg("Invalid file type. Please upload a JPG, PNG, WEBP image or a PDF document.");
+      setStatus('error');
+      return;
+    }
+
     setLoading(true);
     setStatus(null);
 

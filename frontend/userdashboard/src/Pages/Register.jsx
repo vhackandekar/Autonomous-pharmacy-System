@@ -11,37 +11,65 @@ const Register = () => {
   const [formData, setFormData] = useState({
     fullName: '',
     email: '',
+    phone: '',
     password: '',
     confirmPassword: '',
-    role: 'User'
   });
   const [isLoading, setIsLoading] = useState(false);
   const [showPopup, setShowPopup] = useState(false);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  // --- FRONTEND STRONG VALIDATION ---
+  const validateForm = () => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const nameRegex = /^[A-Za-z\s]{2,}$/;
+    // Password: Min 8 chars, 1 upper, 1 lower, 1 number, 1 special
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+
+    if (!nameRegex.test(formData.fullName.trim())) {
+      alert("Name must be at least 2 characters long and contain only letters.");
+      return false;
+    }
+    if (!emailRegex.test(formData.email)) {
+      alert("Please enter a valid email address.");
+      return false;
+    }
+    if (!passwordRegex.test(formData.password)) {
+      alert("Password must be at least 8 characters long, include an uppercase letter, a lowercase letter, a number, and a special character.");
+      return false;
+    }
+    const phoneRegex = /^\d{10}$/;
+    if (!phoneRegex.test(formData.phone.trim())) {
+      alert("Phone number must be exactly 10 digits.");
+      return false;
+    }
     if (formData.password !== formData.confirmPassword) {
       alert("Passwords do not match!");
-      return;
+      return false;
     }
+    return true;
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!validateForm()) return;
 
     setIsLoading(true);
 
     try {
       // Call backend registration
-      await authAPI.register({
+      const response = await authAPI.register({
         name: formData.fullName,
         email: formData.email,
         password: formData.password,
-        role: formData.role.toUpperCase(), // Normalize to USER/ADMIN
-        phone: "0000000000" // Placeholder phone
+        phone: formData.phone
       });
 
-      // Notify user and navigate to login
+      // Notify user and navigate to Login
       setShowPopup(true);
       setTimeout(() => {
         setIsLoading(false);
-        navigate('/'); // Go to login after successful registration
+        navigate('/');
       }, 2000);
     } catch (error) {
       console.error("Registration failed:", error);
@@ -85,16 +113,28 @@ const Register = () => {
             />
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-purple-300/70 ml-1">Email Address</label>
-            <input
-              type="email"
-              required
-              autoComplete="off"
-              placeholder="example@gmail.com"
-              className="w-full bg-[#141225] border border-purple-800 text-white rounded-lg px-4 py-3 text-sm focus:border-purple-400 focus:ring-2 focus:ring-purple-500/40 outline-none transition-all duration-300 placeholder:text-purple-300/20"
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-purple-300/70 ml-1">Email Address</label>
+              <input
+                type="email"
+                required
+                autoComplete="off"
+                placeholder="example@gmail.com"
+                className="w-full bg-[#141225] border border-purple-800 text-white rounded-lg px-4 py-3 text-sm focus:border-purple-400 focus:ring-2 focus:ring-purple-500/40 outline-none transition-all duration-300 placeholder:text-purple-300/20"
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-purple-300/70 ml-1">Phone Number</label>
+              <input
+                type="tel"
+                required
+                placeholder="+91 98765 43210"
+                className="w-full bg-[#141225] border border-purple-800 text-white rounded-lg px-4 py-3 text-sm focus:border-purple-400 focus:ring-2 focus:ring-purple-500/40 outline-none transition-all duration-300 placeholder:text-purple-300/20"
+                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -121,18 +161,6 @@ const Register = () => {
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-purple-300/70 ml-1">Select Role</label>
-            <select
-              className="w-full bg-[#141225] border border-purple-800 text-white rounded-lg px-4 py-3 text-sm focus:border-purple-400 focus:ring-2 focus:ring-purple-500/40 outline-none transition-all duration-300 appearance-none cursor-pointer"
-              onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-              value={formData.role}
-            >
-              <option value="User">User</option>
-              <option value="Admin">Admin</option>
-            </select>
-          </div>
-
           <button
             type="submit"
             disabled={isLoading}
@@ -153,7 +181,7 @@ const Register = () => {
         </p>
       </motion.div>
 
-      {/* OTP Sent Popup */}
+      {/* Success Popup */}
       <AnimatePresence>
         {showPopup && (
           <motion.div
@@ -166,8 +194,8 @@ const Register = () => {
               <Activity className="w-6 h-6 text-purple-400 animate-pulse" />
             </div>
             <div>
-              <h4 className="text-white font-bold text-sm">OTP Sent!</h4>
-              <p className="text-purple-300/60 text-xs text-nowrap">Verification code sent to your email.</p>
+              <h4 className="text-white font-bold text-sm">Account Created!</h4>
+              <p className="text-purple-300/60 text-xs text-nowrap">Welcome to AI Pharmacy Platform.</p>
             </div>
           </motion.div>
         )}

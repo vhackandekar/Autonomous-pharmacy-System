@@ -14,10 +14,31 @@ class SafetyAgent {
         let isApproved = true;
         const reasons = [];
 
+        // --- NEW: Address Validation ---
+        const User = require('../schema/User');
+        const user = await User.findById(userId);
+        if (!user || !user.address1 || !user.city) {
+            isApproved = false;
+            reasons.push("Delivery address is missing from your profile.");
+            return {
+                isApproved: false,
+                reasons,
+                details: items.map(i => ({ medicine_name: i.medicine_name, status: 'REJECTED', reason: 'ADDRESS_MISSING' }))
+            };
+        }
+
         for (const item of items) {
-            const escapedName = item.medicine_name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            // Use word boundaries to avoid partial matches (e.g., "Cold" matching "Cold & Cough")
-            const medicine = await Medicine.findOne({ name: { $regex: new RegExp(`\\b${escapedName}\\b`, 'i') } });
+            const medName = item.medicine_name || "";
+            if (!medName || medName.toLowerCase() === 'undefined') continue;
+
+            const escapedName = medName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            // 1. Try Fuzzy Match (Contains Name or Alternate Names)
+            let medicine = await Medicine.findOne({
+                $or: [
+                    { name: { $regex: new RegExp(escapedName, 'i') } },
+                    { alternateNames: { $in: [new RegExp(escapedName, 'i')] } }
+                ]
+            });
 
             if (!medicine) {
                 isApproved = false;
@@ -39,7 +60,7 @@ class SafetyAgent {
                 const validPrescription = await Prescription.findOne({
                     userId,
                     medicineId: medicine._id,
-                    status: 'VERIFIED',
+                    status: { $in: ['VERIFIED', 'PENDING_ADMIN_REVIEW'] },
                     validTill: { $gt: new Date() },
                     $or: [
                         { isReusable: true },

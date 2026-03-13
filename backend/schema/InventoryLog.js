@@ -5,7 +5,7 @@ const inventoryLogSchema = new mongoose.Schema({
     change: { type: Number, required: true }, // Positive or negative
     reason: {
         type: String,
-        enum: ['ORDER_PLACED', 'REFILL', 'MANUAL_UPDATE', 'ORDER_FULFILLED', 'RESTOCK', 'ORDER_DELIVERED', 'ORDER_STATUS_REVERTED_FROM_DELIVERY', 'RETURN'],
+        enum: ['ORDER_PLACED', 'REFILL', 'MANUAL_UPDATE', 'ORDER_FULFILLED', 'RESTOCK', 'ORDER_DELIVERED', 'ORDER_STATUS_REVERTED_FROM_DELIVERY', 'RETURN', 'ORDER_PLACED_VIA_AGENT', 'MANUAL_ORDER_PLACED'],
         required: true
     },
 }, { timestamps: true });

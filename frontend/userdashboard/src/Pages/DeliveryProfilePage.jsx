@@ -52,7 +52,40 @@ const DeliveryProfilePage = () => {
 
   const set = (field, val) => setForm(prev => ({ ...prev, [field]: val }));
 
+  const validateForm = () => {
+    const nameRegex = /^[A-Za-z\s]{2,}$/;
+    const phoneRegex = /^\d{10}$/;
+    const pinRegex = /^\d{6}$/;
+
+    if (!nameRegex.test(form.name.trim())) {
+      alert("Name must be at least 2 characters long and contain only letters.");
+      return false;
+    }
+    if (!phoneRegex.test(form.phone.trim())) {
+      alert("Phone number must be exactly 10 digits.");
+      return false;
+    }
+    if (!form.address1.trim()) {
+      alert("Address Line 1 is required.");
+      return false;
+    }
+    if (!form.city.trim()) {
+      alert("City is required.");
+      return false;
+    }
+    if (!form.state.trim()) {
+      alert("State is required.");
+      return false;
+    }
+    if (!pinRegex.test(form.pin.trim())) {
+      alert("PIN Code must be exactly 6 digits.");
+      return false;
+    }
+    return true;
+  };
+
   const handleSave = async () => {
+    if (!validateForm()) return;
     try {
       await authAPI.updateProfile({
         ...form
@@ -61,6 +94,7 @@ const DeliveryProfilePage = () => {
       setTimeout(() => setSaved(false), 2500);
     } catch (error) {
       console.error("Failed to save profile:", error);
+      alert(error.response?.data?.error || "Failed to update profile.");
     }
   };
 

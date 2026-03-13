@@ -19,8 +19,8 @@ exports.getStats = async (req, res) => {
 
         // Counts by shipment status for dashboard quick-stats
         const pendingCount = await Order.countDocuments({ status: 'PENDING' });
-        const processingCount = await Order.countDocuments({ status: 'PROCESSING' });
-        const shippedCount = await Order.countDocuments({ status: 'SHIPPED' });
+        const confirmedCount = await Order.countDocuments({ status: 'CONFIRMED' });
+        const outForDeliveryCount = await Order.countDocuments({ status: 'OUT_FOR_DELIVERY' });
 
         // Calculate total revenue from delivered orders
         const deliveredOrders = await Order.find({ status: 'DELIVERED' }).select('totalAmount');
@@ -33,11 +33,11 @@ exports.getStats = async (req, res) => {
             ordersToday,
             totalRevenue,
             // Expose counts for frontend
-            processingCount,
-            shippedCount,
+            confirmedCount,
+            outForDeliveryCount,
             // Main counts for frontend dashboard cards
             pendingOrders: pendingCount,
-            inWarehouseCount: processingCount,
+            inWarehouseCount: confirmedCount,
             deliveredCount: deliveredOrders.length
         });
     } catch (error) {
@@ -61,7 +61,7 @@ const PredictiveRefillAgent = require('../Agents/PredictiveRefillAgent');
 exports.updateOrderStatus = async (req, res) => {
     try {
         const { status } = req.body;
-        const validStatuses = ['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'REJECTED'];
+        const validStatuses = ['PENDING', 'CONFIRMED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'];
 
         if (!validStatuses.includes(status)) {
             return res.status(400).json({ error: 'Invalid status' });
@@ -74,73 +74,50 @@ exports.updateOrderStatus = async (req, res) => {
         console.log(`Updating order ${order._id} from ${previousStatus} to ${status}`);
 
         // 1. Restore stock if moving BACK from DELIVERED
-        if (previousStatus === 'DELIVERED' && status !== 'DELIVERED') {
-            for (const item of order.items) {
-                const oldMed = await Medicine.findById(item.medicineId);
-                const oldStock = oldMed ? oldMed.stock : -1;
+        // 1. Restore stock if moving BACK from DELIVERED or moving to CANCELLED
+        if ((previousStatus === 'DELIVERED' && status !== 'DELIVERED') || status === 'CANCELLED') {
+            // But only restore if the order wasn't already CANCELLED (to avoid double restoration)
+            if (previousStatus !== 'CANCELLED') {
+                for (const item of order.items) {
+                    const oldMed = await Medicine.findById(item.medicineId);
+                    const oldStock = oldMed ? oldMed.stock : -1;
 
-                const med = await Medicine.findByIdAndUpdate(item.medicineId, {
-                    $inc: { stock: item.quantity },
-                    lowStockNotified: false
-                }, { new: true });
+                    const med = await Medicine.findByIdAndUpdate(item.medicineId, {
+                        $inc: { stock: item.quantity },
+                        lowStockNotified: false
+                    }, { new: true });
 
-                if (med) {
-                    await new InventoryLog({
-                        medicineId: med._id,
-                        change: item.quantity,
-                        reason: 'ORDER_STATUS_REVERTED_FROM_DELIVERY'
-                    }).save();
+                    if (med) {
+                        await new InventoryLog({
+                            medicineId: med._id,
+                            change: item.quantity,
+                            reason: `ORDER_STATUS_CHANGED_TO_${status}`
+                        }).save();
 
-                    // Trigger Back-in-Stock Notifications if stock was 0 but is now > 0
-                    if (oldStock === 0 && med.stock > 0) {
-                        console.log(`[AVAILABILITY_REVERT] Stock for ${med.name} restored via Order Revert. Notifying users...`);
-                        await stockAlertController.notifyBackInStock(med._id);
+                        // Trigger Back-in-Stock Notifications if stock was 0 but is now > 0
+                        if (oldStock === 0 && med.stock > 0) {
+                            console.log(`[AVAILABILITY_REVERT] Stock for ${med.name} restored via Admin Update. Notifying users...`);
+                            await stockAlertController.notifyBackInStock(med._id);
+                        }
                     }
-                } else {
-                    console.warn(`[Stock Restore] Medicine ${item.medicineId} not found for order ${order._id}`);
                 }
             }
         }
 
         // 2. Deduct stock ONLY when moving to DELIVERED status from anything else
+        // 2. We no longer deduct stock on DELIVERED as it is reserved at order creation.
+        // We only perform the low-stock notification check here for finality.
         if (status === 'DELIVERED' && previousStatus !== 'DELIVERED') {
             for (const item of order.items) {
-                // Deduct Stock
-                const med = await Medicine.findByIdAndUpdate(item.medicineId, {
-                    $inc: { stock: -item.quantity },
-                    lowStockNotified: false
-                }, { new: true });
-
-                if (!med) {
-                    console.warn(`[Stock Deduct] Medicine ${item.medicineId} not found for order ${order._id}`);
-                    continue;
-                }
-
-                // Log Inventory Change
-                await new InventoryLog({
-                    medicineId: med._id,
-                    change: -item.quantity,
-                    reason: 'ORDER_DELIVERED'
-                }).save();
-
-                // Low Stock Check
-                if (med.stock < (med.reorderLevel || 10) && !med.lowStockNotified) {
+                const med = await Medicine.findById(item.medicineId);
+                if (med && med.stock < (med.reorderLevel || 10) && !med.lowStockNotified) {
                     const adminNotif = new Notification({
                         recipientRole: 'ADMIN',
                         type: 'stock_alert',
                         message: `⚠️ Inventory Alert: ${med.name} is running critically low (${med.stock} units left).`
                     });
                     await adminNotif.save();
-
                     if (global.io) global.io.to('admin').emit('stock_alert', adminNotif);
-
-                    if (process.env.N8N_REFILL_WEBHOOK_URL) {
-                        axios.post(process.env.N8N_REFILL_WEBHOOK_URL, {
-                            type: 'STOCK_ALERT',
-                            medicineName: med.name,
-                            stockLeft: med.stock
-                        }).catch(e => console.error('Webhook failed', e.message));
-                    }
 
                     med.lowStockNotified = true;
                     await med.save();
@@ -153,7 +130,7 @@ exports.updateOrderStatus = async (req, res) => {
 
         // Create notifications and emit updates
         try {
-            let msg = (status === 'REJECTED' || status === 'CANCELLED')
+            let msg = (status === 'CANCELLED')
                 ? `Your order ${order._id} was ${status.toLowerCase()}.`
                 : `Your order ${order._id} has been updated to ${status.toLowerCase()}.`;
 
@@ -192,7 +169,8 @@ exports.getAnalytics = async (req, res) => {
         // Get orders stats
         const totalOrders = await Order.countDocuments();
         const pendingOrders = await Order.countDocuments({ status: 'PENDING' });
-        const shippedOrders = await Order.countDocuments({ status: 'SHIPPED' });
+        const confirmedOrders = await Order.countDocuments({ status: 'CONFIRMED' });
+        const outForDeliveryOrders = await Order.countDocuments({ status: 'OUT_FOR_DELIVERY' });
         const deliveredOrders = await Order.countDocuments({ status: 'DELIVERED' });
 
         // Calculate total revenue
@@ -208,7 +186,8 @@ exports.getAnalytics = async (req, res) => {
             ordersStats: {
                 total: totalOrders,
                 pending: pendingOrders,
-                shipped: shippedOrders,
+                confirmed: confirmedOrders,
+                outForDelivery: outForDeliveryOrders,
                 delivered: deliveredOrders
             },
             inventoryHealth: {

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const agentController = require('../controller/agentController');
-const { verifyToken } = require('../middleware/auth');
+const { verifyToken, verifyAdmin } = require('../middleware/auth');
 
 const multer = require('multer');
 const path = require('path');
@@ -79,6 +79,6 @@ const audioUpload = multer({
 router.post('/chat', verifyToken, agentController.chat);
 router.post('/chat/upload', verifyToken, uploadHandler, agentController.chatUpload);
 router.post('/stt', verifyToken, audioUpload.single('audio'), agentController.speechToText);
-router.get('/logs', verifyToken, agentController.getLogs);
+router.get('/logs', verifyToken, verifyAdmin, agentController.getLogs);
 
 module.exports = router;

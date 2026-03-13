@@ -52,8 +52,12 @@ exports.addToCart = async (req, res) => {
         const userId = req.user.id;
         const { medicineId, quantity } = req.body;
 
-        if (!medicineId || !quantity) {
+        if (!medicineId || quantity === undefined) {
             return res.status(400).json({ error: 'medicineId and quantity are required' });
+        }
+
+        if (!Number.isInteger(quantity) || quantity < 1) {
+            return res.status(400).json({ error: 'Quantity must be a positive integer' });
         }
 
         // Stock check
@@ -88,6 +92,10 @@ exports.updateCart = async (req, res) => {
     try {
         const userId = req.user.id;
         const { cartId, medicineId, quantity } = req.body;
+
+        if (quantity === undefined || !Number.isInteger(quantity) || quantity < 1) {
+            return res.status(400).json({ error: 'Quantity must be a positive integer' });
+        }
 
         // Stock check
         const medicine = await Medicine.findById(medicineId);

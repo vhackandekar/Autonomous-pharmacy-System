@@ -509,7 +509,7 @@ async function getMonthlyRevenueTrend() {
 }
 
 async function getOrderStatusDistribution() {
-    const allowedStatuses = ['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
+    const allowedStatuses = ['PENDING', 'CONFIRMED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'];
 
     // Fetch all relevant orders to process grouping manually for accuracy
     const orders = await Order.find().select('status');
@@ -519,7 +519,10 @@ async function getOrderStatusDistribution() {
 
     orders.forEach(order => {
         let status = order.status || 'PENDING';
+        if (status === 'PROCESSING') status = 'CONFIRMED';
+        if (status === 'SHIPPED') status = 'OUT_FOR_DELIVERY';
         if (status === 'REJECTED') status = 'CANCELLED';
+
         if (allowedStatuses.includes(status)) {
             counts[status]++;
         }

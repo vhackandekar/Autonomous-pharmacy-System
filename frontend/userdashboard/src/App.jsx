@@ -2,10 +2,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './Component/Layout';
 import Login from './Pages/Login';
 import Register from './Pages/Register';
-import OTPVerification from './Pages/OTPVerification';
 import ForgotPassword from './Pages/ForgotPassword';
 import UserDashboard from './Pages/UserDashboard';
-import AdminDashboard from './Pages/AdminDashboard';
 import MyOrders from './Pages/MyOrders';
 import ChatPage from './Pages/ChatPage';
 import CartPage from './Pages/CartPage';
@@ -14,8 +12,6 @@ import HistoryPage from './Pages/History';
 import PrescriptionsPage from './Pages/Prescriptions';
 import DeliveryProfilePage from './Pages/DeliveryProfilePage';
 import OrderDetails from './pages/OrderDetails';
-
-
 
 import { AuthProvider } from './context/AuthContext';
 import PrivateRoute from './Component/PrivateRoute';
@@ -27,7 +23,6 @@ function App() {
         {/* Auth Routes */}
         <Route path="/" element={<Login />} />
         <Route path="/register" element={<Register />} />
-        <Route path="/verify-otp" element={<OTPVerification />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
 
         {/* Dashboard Routes wrapped in Layout and PrivateRoute */}
@@ -41,9 +36,6 @@ function App() {
         <Route path="/prescriptions" element={<PrivateRoute><Layout><PrescriptionsPage /></Layout></PrivateRoute>} />
         <Route path="/profile" element={<PrivateRoute><Layout><DeliveryProfilePage /></Layout></PrivateRoute>} />
         <Route path="/settings" element={<PrivateRoute><Layout><SettingsPage /></Layout></PrivateRoute>} />
-
-        {/* Admin Routes */}
-        <Route path="/admin-panel" element={<PrivateRoute><Layout><AdminDashboard /></Layout></PrivateRoute>} />
 
       </Routes>
     </BrowserRouter>

@@ -11,11 +11,27 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState('User');
   const [isLoading, setIsLoading] = useState(false);
+
+  // --- FRONTEND VALIDATION ---
+  const validateForm = () => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      alert("Please enter a valid email address.");
+      return false;
+    }
+    if (password.length < 8) {
+      alert("Password must be at least 8 characters long.");
+      return false;
+    }
+    return true;
+  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
+
+    if (!validateForm()) return;
+
     setIsLoading(true);
 
     try {
@@ -26,17 +42,11 @@ const Login = () => {
         const userData = {
           ...data.user,
           initials: data.user.name.split(' ').map(n => n[0]).join('').toUpperCase(),
-          // Backend returns role like 'USER' or 'ADMIN', normalize for UI
-          role: data.user.role === 'ADMIN' ? 'Admin' : 'User'
+          role: 'User' // Default to User
         };
 
         login(userData, data.token);
-
-        if (userData.role === 'Admin') {
-          navigate('/admin-panel');
-        } else {
-          navigate('/chat');
-        }
+        navigate('/chat');
       }
     } catch (error) {
       console.error("Login failed:", error);
@@ -124,23 +134,6 @@ const Login = () => {
               >
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
-            </div>
-          </div>
-
-          {/* Role Selection */}
-          <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase tracking-widest text-white/40 ml-1">Access Role</label>
-            <div className="relative group">
-              <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/20 group-focus-within:text-purple-500 transition-colors" />
-              <select
-                value={role}
-                onChange={(e) => setRole(e.target.value)}
-                className="w-full bg-[#1c1d2b]/50 border border-white/5 rounded-xl py-3 pl-11 pr-10 text-sm text-white appearance-none focus:outline-none focus:border-purple-500/50 focus:ring-4 focus:ring-purple-500/10 transition-all cursor-pointer"
-              >
-                <option value="User" className="bg-[#1c1d2b] text-white">User</option>
-                <option value="Admin" className="bg-[#1c1d2b] text-white">Admin</option>
-              </select>
-              <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-3 h-3 text-white/20 pointer-events-none transition-all" />
             </div>
           </div>
 

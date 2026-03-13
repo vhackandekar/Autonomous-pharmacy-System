@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const prescriptionController = require('../controller/prescriptionController');
-const { verifyToken, isAdmin } = require('../middleware/auth');
+const { verifyToken, verifyAdmin } = require('../middleware/auth');
 const multer = require('multer');
 const path = require('path');
 
@@ -64,7 +64,7 @@ router.get('/validate', verifyToken, prescriptionController.validatePrescription
 router.get('/my', verifyToken, prescriptionController.getUserPrescriptions);
 router.post('/upload', verifyToken, uploadHandler, prescriptionController.uploadPrescription);
 router.delete('/:id', verifyToken, prescriptionController.deletePrescription);
-router.get('/all', verifyToken, isAdmin, prescriptionController.getAllPrescriptions);
-router.put('/review/:id', verifyToken, isAdmin, prescriptionController.adminReviewPrescription);
+router.get('/all', verifyToken, verifyAdmin, prescriptionController.getAllPrescriptions);
+router.put('/review/:id', verifyToken, verifyAdmin, prescriptionController.adminReviewPrescription);
 
 module.exports = router;

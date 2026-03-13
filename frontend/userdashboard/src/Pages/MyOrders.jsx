@@ -14,21 +14,16 @@ const MyOrders = () => {
   const getStatusVariant = (status) => {
     switch (status.toUpperCase()) {
       case 'PENDING': return 'warning';
-      case 'PROCESSING': return 'info';
       case 'CONFIRMED': return 'info';
-      case 'PLACED': return 'warning';
-      case 'IN_WAREHOUSE': return 'purple';
-      case 'SHIPPED': return 'purple';
+      case 'OUT_FOR_DELIVERY': return 'purple';
       case 'DELIVERED': return 'success';
-      case 'FULFILLED': return 'success';
-      case 'REJECTED': return 'error';
       case 'CANCELLED': return 'error';
       default: return 'info';
     }
   };
 
   const activeOrders = orders.filter(order =>
-    ['Awaiting Payment', 'Placed', 'CONFIRMED', 'IN_WAREHOUSE', 'SHIPPED', 'PENDING', 'AWAITING_CONFIRMATION', 'PROCESSING'].includes(order.status.toUpperCase())
+    ['CONFIRMED', 'OUT_FOR_DELIVERY', 'PENDING'].includes(order.status.toUpperCase())
   );
 
   return (
@@ -58,7 +53,7 @@ const MyOrders = () => {
             >
               <div className="bg-white dark:bg-white/5 rounded-2xl border-2 border-black/5 dark:border-white/10 p-5 flex flex-col md:flex-row items-center gap-6 group-hover:border-brand-primary/30 transition-all duration-300 shadow-sm hover:shadow-2xl hover:shadow-brand-primary/5 relative overflow-hidden">
                 {/* Status Indicator Bar */}
-                <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${order.status === 'CONFIRMED' ? 'bg-green-500' : 'bg-brand-primary'
+                <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${['CONFIRMED', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(order.status) ? 'bg-green-500' : 'bg-brand-primary'
                   }`} />
 
                 <div className="flex items-center gap-6 flex-1 w-full">

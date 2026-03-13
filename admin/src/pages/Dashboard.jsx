@@ -17,15 +17,14 @@ import { useAuth } from '../context/AuthContext';
 
 
 const statusClass = (s) => {
-  const normalized = (s === 'REJECTED') ? 'CANCELLED' : s;
   const m = {
-    PENDING: 'confirmed',
+    PENDING: 'pending',
     CANCELLED: 'rejected',
-    PROCESSING: 'processing',
-    SHIPPED: 'shipped',
+    CONFIRMED: 'confirmed',
+    OUT_FOR_DELIVERY: 'shipped',
     DELIVERED: 'delivered'
   };
-  return m[normalized] || 'pending';
+  return m[s] || 'pending';
 };
 
 const CustomTooltip = ({ active, payload, label }) => {
@@ -119,12 +118,15 @@ export default function Dashboard() {
       });
       setCategoryData(Object.keys(catMap).map(name => ({ name, value: catMap[name] })));
 
-      const allowedStatuses = ['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
+      const allowedStatuses = ['PENDING', 'CONFIRMED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'];
       const statusMap = allowedStatuses.reduce((acc, status) => ({ ...acc, [status]: 0 }), {});
 
       allOrders.forEach(order => {
         let status = order.status || 'PENDING';
+        if (status === 'PROCESSING') status = 'CONFIRMED';
+        if (status === 'SHIPPED') status = 'OUT_FOR_DELIVERY';
         if (status === 'REJECTED') status = 'CANCELLED';
+
         if (allowedStatuses.includes(status)) {
           statusMap[status]++;
         }
@@ -261,8 +263,8 @@ export default function Dashboard() {
           <div className="stat-card-header">
             <div className="stat-icon blue"><ShoppingCart size={20} /></div>
           </div>
-          <div className="stat-value">{stats?.processingCount ?? stats?.pendingOrders ?? 0}</div>
-          <div className="stat-label">Orders Processing</div>
+          <div className="stat-value">{stats?.confirmedCount ?? 0}</div>
+          <div className="stat-label">Confirmed & Packing</div>
         </div>
 
         <div className="stat-card">
@@ -270,9 +272,9 @@ export default function Dashboard() {
             <div className="stat-icon purple"><Truck size={20} /></div>
           </div>
           <div className="stat-value">
-            {stats?.shippedCount ?? 0}
+            {stats?.outForDeliveryCount ?? 0}
           </div>
-          <div className="stat-label">Active Shipments</div>
+          <div className="stat-label">Out For Delivery</div>
         </div>
       </div >
 

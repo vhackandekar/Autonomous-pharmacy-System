@@ -3,6 +3,7 @@ const Cart = require('../schema/Cart');
 const Medicine = require('../schema/Medicine');
 const Notification = require('../schema/Notification');
 const Prescription = require('../schema/Prescription');
+const InventoryLog = require('../schema/InventoryLog');
 const OrderPlacementAgent = require('../Agents/OrderPlacementAgent');
 const PredictiveRefillAgent = require('../Agents/PredictiveRefillAgent');
 
@@ -97,6 +98,19 @@ exports.placeOrder = async (req, res) => {
             paymentMethod: paymentMethod || 'COD'
         });
 
+        // 2b. Deduct stock before saving order (RESERVATION)
+        for (const item of orderItems) {
+            await Medicine.findByIdAndUpdate(item.medicineId, {
+                $inc: { stock: -item.quantity },
+                lowStockNotified: false
+            });
+            await new InventoryLog({
+                medicineId: item.medicineId,
+                change: -item.quantity,
+                reason: 'MANUAL_ORDER_PLACED'
+            }).save();
+        }
+
         await order.save();
 
         // 3. Mark cart as completed
@@ -176,8 +190,8 @@ exports.cancelOrder = async (req, res) => {
 
         // Can only cancel if PENDING or PROCESSING?
         // Let's allow cancelling if not SHIPPED or DELIVERED for now
-        if (order.status === 'DELIVERED') {
-            return res.status(400).json({ error: 'Cannot cancel an order that is already delivered.' });
+        if (order.status === 'DELIVERED' || order.status === 'OUT_FOR_DELIVERY') {
+            return res.status(400).json({ error: 'Cannot cancel an order that is already shipped or delivered.' });
         }
 
         if (order.status === 'CANCELLED') {
@@ -186,6 +200,19 @@ exports.cancelOrder = async (req, res) => {
 
         // No stock reversion needed here as stock isn't deducted until delivery.
         // And we already block cancelling if status is DELIVERED.
+
+        // RESTORE STOCK ON CANCELLATION
+        for (const item of order.items) {
+            await Medicine.findByIdAndUpdate(item.medicineId, {
+                $inc: { stock: item.quantity },
+                lowStockNotified: false
+            });
+            await new InventoryLog({
+                medicineId: item.medicineId,
+                change: item.quantity,
+                reason: 'ORDER_CANCELLED'
+            }).save();
+        }
 
         order.status = 'CANCELLED';
         await order.save();

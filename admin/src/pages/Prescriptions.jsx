@@ -47,7 +47,11 @@ export default function Prescriptions() {
     };
 
     const filteredData = prescriptions.filter(p => {
-        const matchesFilter = filter === 'ALL' || p.status === filter;
+        let matchesFilter = filter === 'ALL' || p.status === filter;
+        if (filter === 'PENDING_ADMIN_REVIEW') {
+            matchesFilter = ['PENDING_ADMIN_REVIEW', 'WARNING', 'DANGEROUS', 'OCR_PARSED'].includes(p.status);
+        }
+
         const matchesSearch =
             p.userId?.name?.toLowerCase().includes(search.toLowerCase()) ||
             p.medicineId?.name?.toLowerCase().includes(search.toLowerCase());
@@ -58,6 +62,8 @@ export default function Prescriptions() {
         switch (status) {
             case 'VERIFIED': return { bg: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', icon: CheckCircle };
             case 'REJECTED': return { bg: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', icon: XCircle };
+            case 'DANGEROUS': return { bg: 'rgba(153, 27, 27, 0.2)', color: '#ef4444', icon: AlertCircle };
+            case 'WARNING': return { bg: 'rgba(245, 158, 11, 0.1)', color: '#f59e0b', icon: AlertCircle };
             case 'PENDING_ADMIN_REVIEW': return { bg: 'rgba(245, 158, 11, 0.1)', color: '#f59e0b', icon: Clock };
             case 'UPLOADED': return { bg: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', icon: Clock };
             case 'EXPIRED': return { bg: 'rgba(107, 114, 128, 0.1)', color: '#6b7280', icon: AlertCircle };
@@ -221,13 +227,13 @@ export default function Prescriptions() {
                                 borderBottom: '1px solid var(--border)'
                             }}>
                                 <img
-                                    src={`http://localhost:5000${selectedItem.imageUrl}`}
+                                    src={selectedItem.imageUrl.startsWith('http') ? selectedItem.imageUrl : `http://localhost:5000${selectedItem.imageUrl}`}
                                     alt="Prescription"
                                     style={{ maxWidth: '100%', maxHeight: 450, objectFit: 'contain' }}
                                 />
                                 <div style={{ position: 'absolute', bottom: 20, right: 20, display: 'flex', gap: 8 }}>
                                     <a
-                                        href={`http://localhost:5000${selectedItem.imageUrl}`}
+                                        href={selectedItem.imageUrl.startsWith('http') ? selectedItem.imageUrl : `http://localhost:5000${selectedItem.imageUrl}`}
                                         target="_blank"
                                         rel="noreferrer"
                                         className="btn btn-secondary"
@@ -240,23 +246,52 @@ export default function Prescriptions() {
 
                             {/* Analysis Side - Now below */}
                             <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>
-                                <div style={{ background: 'rgba(34, 197, 94, 0.05)', padding: 20, borderRadius: 16, border: '1px solid rgba(34, 197, 94, 0.1)' }}>
+                                <div style={{
+                                    background: selectedItem.status === 'DANGEROUS' ? 'rgba(239, 68, 68, 0.05)' : 'rgba(34, 197, 94, 0.05)',
+                                    padding: 20,
+                                    borderRadius: 16,
+                                    border: `1px solid ${selectedItem.status === 'DANGEROUS' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(34, 197, 94, 0.1)'}`
+                                }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                                        <div style={{ background: 'var(--brand)', color: 'white', padding: 6, borderRadius: 8 }}>
-                                            <ShieldCheck size={18} />
+                                        <div style={{ background: selectedItem.status === 'DANGEROUS' ? '#ef4444' : 'var(--brand)', color: 'white', padding: 6, borderRadius: 8 }}>
+                                            {selectedItem.status === 'DANGEROUS' ? <AlertCircle size={18} /> : <ShieldCheck size={18} />}
                                         </div>
-                                        <span style={{ fontWeight: 700, fontSize: 15 }}>Clinical Validation Notes</span>
+                                        <span style={{ fontWeight: 700, fontSize: 15 }}>
+                                            {selectedItem.status === 'DANGEROUS' ? '⚠️ CRITICAL SAFETY ALERT' : 'Clinical Validation Notes'}
+                                        </span>
                                     </div>
-                                    <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0, fontStyle: 'italic', background: 'var(--bg-card)', padding: 12, borderRadius: 8 }}>
+                                    <p style={{
+                                        fontSize: 13,
+                                        color: selectedItem.status === 'DANGEROUS' ? '#ef4444' : 'var(--text-secondary)',
+                                        lineHeight: 1.6,
+                                        margin: 0,
+                                        fontWeight: selectedItem.status === 'DANGEROUS' ? 700 : 400,
+                                        background: 'var(--bg-card)',
+                                        padding: 12,
+                                        borderRadius: 8,
+                                        border: selectedItem.status === 'DANGEROUS' ? '1px solid #ef4444' : 'none'
+                                    }}>
                                         {selectedItem.extractedData?.validationNotes || "System automatically flagged this for review."}
                                     </p>
+
+                                    {/* Detailed Warnings from AI Engine */}
+                                    {selectedItem.extractedData?.structuredData?.warnings?.length > 0 && (
+                                        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                            {selectedItem.extractedData.structuredData.warnings.map((w, idx) => (
+                                                <div key={idx} style={{ fontSize: 12, color: '#ef4444', display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0' }}>
+                                                    <AlertCircle size={14} /> {w}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
 
                                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 16 }}>
                                         {[
                                             { label: 'Extraction', active: selectedItem.extractedData?.confidence > 0, color: '#22c55e' },
                                             { label: 'Match', active: selectedItem.extractedData?.detectedMedicines?.length > 0, color: '#22c55e' },
                                             { label: 'Stock', active: !selectedItem.extractedData?.validationNotes?.includes('out of stock'), color: '#22c55e', fallbackColor: '#ef4444' },
-                                            { label: 'Tag Check', active: !selectedItem.extractedData?.validationNotes?.includes('OTC'), color: '#22c55e', fallbackColor: '#f59e0b' }
+                                            { label: 'Safety', active: selectedItem.status !== 'DANGEROUS', color: '#22c55e', fallbackColor: '#ef4444' },
+                                            { label: 'Dosage', active: !selectedItem.extractedData?.validationNotes?.includes('Dosage'), color: '#22c55e', fallbackColor: '#f59e0b' }
                                         ].map((tag, idx) => (
                                             <div key={idx} style={{
                                                 padding: '6px 12px',

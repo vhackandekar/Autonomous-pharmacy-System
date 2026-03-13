@@ -15,6 +15,9 @@ const medicineSchema = new mongoose.Schema({
     costPrice: { type: Number, default: 0 },
     prescriptionRequired: { type: Boolean, default: false },
     isChronic: { type: Boolean, default: false }, // If true, prescription is reusable until expiry
+    safeDosageLimit: { type: String }, // e.g., "4000mg/day"
+    interactions: [{ type: String }], // Array of medicine names it interacts with
+    alternateNames: [{ type: String }], // Fuzzy matching aliases
 }, { timestamps: true });
 
 module.exports = mongoose.model('Medicine', medicineSchema);

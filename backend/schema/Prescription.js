@@ -11,11 +11,12 @@ const prescriptionSchema = new mongoose.Schema({
     issuedBy: { type: String, default: 'Pending Extraction' },
     validTill: { type: Date },
     imageUrl: { type: String, required: true },
+    cloudinaryPublicId: { type: String },
 
     // Status Lifecycle
     status: {
         type: String,
-        enum: ['UPLOADED', 'OCR_PARSED', 'PENDING_ADMIN_REVIEW', 'VERIFIED', 'REJECTED', 'EXPIRED'],
+        enum: ['UPLOADED', 'OCR_PARSED', 'PENDING_ADMIN_REVIEW', 'VERIFIED', 'REJECTED', 'EXPIRED', 'WARNING', 'DANGEROUS'],
         default: 'UPLOADED'
     },
 
@@ -36,7 +37,8 @@ const prescriptionSchema = new mongoose.Schema({
         doctorName: { type: String },
         issuedDate: { type: Date },
         dosage: { type: String },
-        validationNotes: { type: String }
+        validationNotes: { type: String },
+        structuredData: { type: Object }
     }
 }, { timestamps: true });
 

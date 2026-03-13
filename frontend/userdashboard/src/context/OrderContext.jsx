@@ -130,7 +130,7 @@ export const OrderProvider = ({ children }) => {
   });
 
   useEffect(() => {
-    const active = orders.filter(o => ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'PLACED', 'PENDING', 'AWAITING_CONFIRMATION'].includes(o.status.toUpperCase())).length;
+    const active = orders.filter(o => ['CONFIRMED', 'OUT_FOR_DELIVERY', 'PENDING'].includes(o.status.toUpperCase())).length;
     setStats(prev => ({
       ...prev,
       activeOrders: active,

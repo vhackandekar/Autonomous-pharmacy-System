@@ -13,7 +13,7 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
     try {
-      const user = await login(form.email || 'admin1@pharmacy.com', form.password || 'admin123');
+      const user = await login(form.email, form.password);
       if (user.role !== 'ADMIN') {
         toast.error('Admin access only');
         return;
@@ -88,9 +88,9 @@ export default function Login() {
           borderRadius: 8, fontSize: 12,
           color: 'var(--text-muted)', lineHeight: 1.7
         }}>
-          <strong style={{ color: 'var(--text-secondary)' }}>Demo Credentials:</strong><br />
+          <strong style={{ color: 'var(--text-secondary)' }}>Credentials:</strong><br />
           Email: admin@pharmacy.com<br />
-          Password: admin123
+          Password: Admin@123
         </div>
       </div>
     </div>

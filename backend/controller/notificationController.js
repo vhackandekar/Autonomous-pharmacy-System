@@ -23,6 +23,7 @@ exports.sendRefillNotification = async (req, res) => {
         res.status(400).json({ error: error.message });
     }
 };
+
 exports.getUserNotifications = async (req, res) => {
     try {
         const notifications = await Notification.find({

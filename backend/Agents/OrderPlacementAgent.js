@@ -41,12 +41,24 @@ class OrderPlacementAgent {
                     throw new Error(`Insufficient stock for ${medicine?.name || 'requested medicine'}`);
                 }
 
+                // --- RESERVE STOCK IMMEDIATELY ---
+                medicine.stock -= (item.quantity || 1);
+                medicine.lowStockNotified = false; // Reset so they get notified again if it dips
+                await medicine.save();
+
+                // Log Inventory Change
+                await new InventoryLog({
+                    medicineId: medicine._id,
+                    change: -(item.quantity || 1),
+                    reason: 'ORDER_PLACED_VIA_AGENT'
+                }).save();
+
                 // 2. Prescription check
                 if (medicine.prescriptionRequired) {
                     const presc = await Prescription.findOne({
                         userId,
                         medicineId: item.medicineId,
-                        status: 'VERIFIED',
+                        status: { $in: ['VERIFIED', 'PENDING_ADMIN_REVIEW'] },
                         validTill: { $gt: new Date() },
                         $or: [
                             { isReusable: true },
@@ -55,6 +67,9 @@ class OrderPlacementAgent {
                     });
 
                     if (!presc) {
+                        // REVERT STOCK if prescription fails (though it should have been caught by SafetyAgent)
+                        medicine.stock += (item.quantity || 1);
+                        await medicine.save();
                         throw new Error(`A verified prescription is required for ${medicine.name}. Please upload one and wait for verification.`);
                     }
                 }
@@ -253,7 +268,7 @@ class OrderPlacementAgent {
                     const presc = await Prescription.findOne({
                         userId: order.userId,
                         medicineId: med._id,
-                        status: 'VERIFIED',
+                        status: { $in: ['VERIFIED', 'PENDING_ADMIN_REVIEW'] },
                         validTill: { $gt: new Date() }
                     }).sort({ createdAt: -1 });
 

@@ -15,13 +15,19 @@ const mockOrders = [
   { _id: '6', id: 'ORD-8897', userId: { name: 'Raj Patel' }, items: [{ medicineId: { name: 'Amoxicillin' }, quantity: 2 }], totalAmount: 17000, status: 'REJECTED', orderDate: new Date('2024-01-15') },
 ];
 
-const ORDER_STATUSES = ['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'REJECTED'];
+const ORDER_STATUSES = ['PENDING', 'CONFIRMED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'];
 
 const normalizeStatus = (s) => s?.toUpperCase() || 'PENDING';
 
 const statusClass = (s) => {
-  const normalized = normalizeStatus(s);
-  return normalized.toLowerCase().replace('_', '-');
+  const m = {
+    PENDING: 'pending',
+    CONFIRMED: 'confirmed',
+    OUT_FOR_DELIVERY: 'shipped',
+    DELIVERED: 'delivered',
+    CANCELLED: 'rejected'
+  };
+  return m[s?.toUpperCase()] || 'pending';
 };
 
 export default function Orders() {

@@ -3,6 +3,7 @@ const Notification = require('../schema/Notification');
 const Medicine = require('../schema/Medicine');
 const PrescriptionAgent = require('../Agents/PrescriptionAgent');
 const fs = require('fs');
+const { uploadToCloudinary } = require('../utils/cloudinary');
 
 /**
  * Validates if a user has a valid prescription for a specific medicine at checkout
@@ -23,7 +24,7 @@ exports.validatePrescription = async (req, res) => {
             const pending = await Prescription.findOne({
                 userId,
                 medicineId,
-                status: { $in: ['UPLOADED', 'OCR_PARSED', 'PENDING_ADMIN_REVIEW'] }
+                status: { $in: ['UPLOADED', 'OCR_PARSED', 'PENDING_ADMIN_REVIEW', 'WARNING', 'DANGEROUS'] }
             });
 
             return res.json({
@@ -40,7 +41,7 @@ exports.validatePrescription = async (req, res) => {
         // If validation data is missing, re-validate (for old prescriptions)
         if (!medicineValidation) {
             const medicine = await Medicine.findById(medicineId);
-            const isValidMedicine = extractedMedicines.some(med => 
+            const isValidMedicine = extractedMedicines.some(med =>
                 med.toLowerCase() === medicine.name.toLowerCase()
             );
 
@@ -85,9 +86,32 @@ exports.getUserPrescriptions = async (req, res) => {
  */
 exports.uploadPrescription = async (req, res) => {
     try {
-        const { userId, medicineId } = req.body;
-        if (!userId || !medicineId || !req.file) {
+        const { userId, medicineId, issuedBy, validTill } = req.body;
+        if (!userId || !medicineId || !req.file || !issuedBy || !validTill) {
+            if (req.file?.path) fs.unlink(req.file.path, () => { });
             return res.status(400).json({ error: 'Missing required fields or file' });
+        }
+
+        // Issued By: min 3 chars
+        if (issuedBy.trim().length < 3) {
+            if (req.file.path) fs.unlink(req.file.path, () => { });
+            return res.status(400).json({ error: "Issued By (Doctor/Hospital) must be at least 3 characters long." });
+        }
+
+        // Date check: must be in the future
+        const pickedDate = new Date(validTill);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        if (pickedDate <= today) {
+            if (req.file.path) fs.unlink(req.file.path, () => { });
+            return res.status(400).json({ error: "Prescription validity must be a future date." });
+        }
+
+        // File type check (server-side)
+        const allowedMime = ['image/jpeg', 'image/png', 'application/pdf', 'image/webp'];
+        if (!allowedMime.includes(req.file.mimetype)) {
+            if (req.file.path) fs.unlink(req.file.path, () => { });
+            return res.status(400).json({ error: "Invalid file type. Please upload a JPG, PNG, WEBP image or a PDF document." });
         }
 
         const medicine = await Medicine.findById(medicineId);
@@ -99,14 +123,21 @@ exports.uploadPrescription = async (req, res) => {
         const prescription = new Prescription({
             userId,
             medicineId,
-            imageUrl: `/uploads/${req.file.filename}`,
+            issuedBy: issuedBy.trim(),
+            validTill: pickedDate,
+            imageUrl: `/uploads/${req.file.filename}`, // Fallback temporary URL
             status: 'UPLOADED'
         });
 
         await prescription.save();
 
-        // RUN BACKGROUND OCR TASK (Non-Blocking)
-        processOCRTask(prescription._id, req.file.path).catch(e => console.error("BG OCR Fail:", e));
+        // RUN BACKGROUND OCR AND CLOUDINARY UPLOAD TASK (Non-Blocking)
+        processOCRTask(prescription._id, req.file.path).catch(e => console.error("BG Task Fail:", e));
+
+        // Notify Admin for awareness
+        try {
+            if (global.io) global.io.to('admin').emit('new_prescription_upload', prescription);
+        } catch (e) { console.error('admin notify error', e); }
 
         res.status(201).json({ success: true, message: "Upload successful. Verification started.", prescription });
     } catch (error) {
@@ -122,9 +153,17 @@ async function processOCRTask(id, filePath) {
     if (!presc) return;
 
     try {
-        const result = await PrescriptionAgent.analyzePrescription(filePath);
+        // 1. PERFORM OCR ANALYSIS (Using local file)
+        const result = await PrescriptionAgent.analyzePrescription(filePath, presc.userId);
 
-        // CRITICAL: Validate that requested medicine is in the prescription
+        // 2. UPLOAD TO CLOUDINARY AND DELETE LOCAL FILE
+        const cloudResult = await uploadToCloudinary(filePath);
+        if (cloudResult) {
+            presc.imageUrl = cloudResult.url;
+            presc.cloudinaryPublicId = cloudResult.publicId;
+        }
+
+        // 3. CLINICAL VALIDATION ENGINE
         const medicineValidation = await PrescriptionAgent.validateMedicineInPrescription(
             presc.medicineId._id,
             result.detectedMedicines
@@ -137,7 +176,8 @@ async function processOCRTask(id, filePath) {
             issuedDate: result.issuedDate,
             dosage: result.dosage,
             validationNotes: result.validationNotes,
-            medicineValidation: medicineValidation // Store validation result
+            medicineValidation: medicineValidation,
+            structuredData: result.structuredData
         };
 
         // REJECT if medicine mismatch
@@ -158,11 +198,10 @@ async function processOCRTask(id, filePath) {
             return;
         }
 
-        // If validation passed, set status based on OCR result
+        // VALIDATION PASSED
         presc.status = result.status;
         presc.issuedBy = result.doctorName || 'Extracted via OCR';
 
-        // Expiry Logic: Use detected date or default to 180 days
         const baseDate = result.issuedDate ? new Date(result.issuedDate) : new Date();
         const expiry = new Date(baseDate);
         expiry.setDate(expiry.getDate() + 180);
@@ -172,16 +211,18 @@ async function processOCRTask(id, filePath) {
 
         await presc.save();
 
-        // Broadcast update via Socket.IO
         if (global.io) {
             global.io.to(String(presc.userId)).emit('prescription_updated', presc);
             global.io.to('admin').emit('notification', {
                 type: 'prescription_alert',
-                message: `✅ Prescription for ${presc.medicineId.name} processed. Status: ${presc.status}. Match: ${medicineValidation.reason}`
+                message: `✅ Prescription for ${presc.medicineId.name} Cloudinary-synced and processed.`
             });
         }
     } catch (err) {
         console.error("OCR Process Fatal Error:", err);
+        // Ensure local file is cleaned up if Cloudinary upload didn't happen
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+
         presc.status = 'REJECTED';
         presc.extractedData = { validationNotes: `Extraction Failed: ${err.message}` };
         await presc.save();
@@ -232,8 +273,13 @@ exports.adminReviewPrescription = async (req, res) => {
  */
 exports.deletePrescription = async (req, res) => {
     try {
-        const presc = await Prescription.findOne({ _id: req.params.id, userId: req.user.id });
+        const presc = await Prescription.findById(req.params.id);
         if (!presc) return res.status(404).json({ error: 'Not found' });
+
+        // Security: Owner or Admin
+        if (presc.userId.toString() !== req.user.id && req.user.role !== 'ADMIN') {
+            return res.status(403).json({ error: "Access denied." });
+        }
 
         const fsPath = presc.imageUrl.startsWith('/') ? presc.imageUrl.substring(1) : presc.imageUrl;
         if (fs.existsSync(fsPath)) fs.unlinkSync(fsPath);

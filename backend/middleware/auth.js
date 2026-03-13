@@ -11,7 +11,7 @@ exports.verifyToken = (req, res, next) => {
 
     try {
         console.log('🔍 Verifying JWT token with secret:', process.env.JWT_SECRET?.slice(0, 10) + '...');
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret');
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
         console.log('✅ JWT verified, user:', decoded.id);
         req.user = decoded;
         next();
@@ -23,9 +23,10 @@ exports.verifyToken = (req, res, next) => {
     }
 };
 
-exports.isAdmin = (req, res, next) => {
-    if (req.user.role !== 'ADMIN') {
-        return res.status(403).json({ error: "Access denied. Admin only." });
+exports.verifyAdmin = (req, res, next) => {
+    if (req.user && req.user.role === 'ADMIN') {
+        next();
+    } else {
+        res.status(403).json({ error: "Access denied. Admin role required." });
     }
-    next();
 };

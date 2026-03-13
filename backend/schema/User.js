@@ -14,6 +14,7 @@ const userSchema = new mongoose.Schema({
     theme: { type: String, enum: ['light', 'dark'], default: 'light' },
     language: { type: String, default: 'English' },
     voiceMode: { type: Boolean, default: false },
+    isVerified: { type: Boolean, default: true },
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);

@@ -14,6 +14,20 @@ const CartPage = () => {
   const total = cart.reduce((sum, item) => sum + (item.price || 0) * item.qty, 0);
 
   const handlePlaceOrder = async () => {
+    if (cart.length === 0) {
+      alert("Your cart is empty.");
+      return;
+    }
+
+    const needsPrescription = cart.filter(item => item.prescriptionRequired && item.prescriptionStatus !== 'VERIFIED');
+
+    if (needsPrescription.length > 0) {
+      const names = needsPrescription.map(i => i.name).join(", ");
+      alert(`Prescription verification required for: ${names}. Please manage your prescriptions before placing the order.`);
+      navigate('/prescriptions');
+      return;
+    }
+
     if (window.confirm("Confirm order placement and proceed to payment?")) {
       await placeCartOrder();
     }

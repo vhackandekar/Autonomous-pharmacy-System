@@ -45,13 +45,12 @@ const reportSectionStyle = {
 const orderStatusClass = (s) => {
   const m = {
     PENDING: 'pending',
-    PROCESSING: 'processing',
-    SHIPPED: 'shipped',
+    CONFIRMED: 'confirmed',
+    OUT_FOR_DELIVERY: 'shipped',
     DELIVERED: 'delivered',
-    CANCELLED: 'rejected',
-    REJECTED: 'rejected'
+    CANCELLED: 'rejected'
   };
-  return m[s] || 'pending';
+  return m[s?.toUpperCase()] || 'pending';
 };
 
 const intentColor = {

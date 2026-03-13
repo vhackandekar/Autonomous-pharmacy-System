@@ -1,278 +1,183 @@
 const Tesseract = require('tesseract.js');
 const path = require('path');
+const fs = require('fs');
+const axios = require('axios');
+const FormData = require('form-data');
+const Groq = require("groq-sdk");
 const Medicine = require('../schema/Medicine');
 
 /**
- * Advanced Prescription Analysis Agent
- * Technique: Tesseract.js Worker + Fuzzy Match + Clinical Rules Engine
+ * AGENT: Advanced Prescription Validation Specialist
+ * TECHNIQUE: Hybrid Pipeline (Local AI OCR + Cloud Vision LLM + Clinical NLP)
  */
 class PrescriptionAgent {
     constructor() {
-        this.EXPIRY_DAYS = 180; // Standard 6 months
+        if (process.env.GROQ_API_KEY) {
+            this.groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+        }
     }
 
-    /**
-     * Primary Pipeline: OCR -> Extract -> Match -> Validate
-     */
-    async analyzePrescription(imagePath, userId = null, parentTrace = null, sessionId = null) {
-        const langfuse = require('../utils/langfuseClient');
-        const trace = parentTrace || (langfuse ? langfuse.trace({
-            name: "Prescription-Analysis-Pipeline",
-            userId: userId ? String(userId) : "anonymous",
-            sessionId: sessionId || "untracked-session",
-            metadata: { imagePath }
-        }) : null);
+    async analyzePrescription(imagePath, userId = null, parentTrace = null) {
+        const absolutePath = path.resolve(imagePath);
+        console.log(`[ADVANCED_AGENT] Starting Pipeline for: ${absolutePath}`);
 
-        let worker;
         try {
-            const absolutePath = path.resolve(imagePath);
-            console.log(`[PRESCRIPTION_AGENT] Processing: ${absolutePath}`);
+            // STEP 1-4: Image Enhancement -> Detection -> Recognition (Local Python Service)
+            let ocrData = { raw_text: '', confidence: 0 };
+            try {
+                ocrData = await this._getPythonAI(absolutePath);
+            } catch (err) {
+                console.warn("[ADVANCED_AGENT] Local AI Service offline, falling back to Tesseract.js");
+                const worker = await Tesseract.createWorker('eng');
+                const result = await worker.recognize(absolutePath);
+                ocrData = { raw_text: result.data.text, confidence: result.data.confidence / 100 };
+                await worker.terminate();
+            }
 
-            // 1. OCR EXECUTION (High fidelity worker)
-            const ocrSpan = trace ? trace.span({
-                name: "OCR-Extraction",
-                input: { path: absolutePath }
-            }) : null;
+            // STEP 5: Vision-Language Model (Document Understanding via Groq Vision)
+            let documentUnderstanding = "";
+            if (this.groq) {
+                try {
+                    const imageBuffer = fs.readFileSync(absolutePath);
+                    const base64Image = imageBuffer.toString('base64');
+                    const mimeType = imagePath.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
 
-            worker = await Tesseract.createWorker('eng');
-            const result = await worker.recognize(absolutePath);
-            const { text: rawText, confidence } = result.data;
-            await worker.terminate();
+                    const visionResponse = await this.groq.chat.completions.create({
+                        messages: [
+                            {
+                                role: "user",
+                                content: [
+                                    { type: "text", text: "Read this medical prescription. Detect medicines, dosages, and doctor info even if handwritten. Respond with the extracted text." },
+                                    { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } }
+                                ]
+                            }
+                        ],
+                        model: "meta-llama/llama-4-scout-17b-16e-instruct",
+                    });
+                    documentUnderstanding = visionResponse.choices[0].message.content;
+                } catch (vErr) {
+                    console.error("[ADVANCED_AGENT] Vision LLM failed:", vErr.message);
+                }
+            }
 
-            if (ocrSpan) ocrSpan.end({ output: { confidence, textLength: rawText.length } });
+            // STEP 6: Medical Entity Extraction (NLP via Groq)
+            const combinedText = `OCR_TEXT: ${ocrData.raw_text}\nVISION_ANALYSIS: ${documentUnderstanding}`;
+            const medicalData = await this._extractMedicalEntities(combinedText);
 
-            // 2. TEXT NORMALIZATION
-            const normalized = this._normalize(rawText);
+            // STEP 7-8: Drug Validation & Confidence Scoring
+            const validation = await this._runClinicalValidation({ ...medicalData, rawText: combinedText }, ocrData.confidence);
 
-            // 3. FIELD EXTRACTION
-            const extractSpan = trace ? trace.span({
-                name: "Field-Extraction",
-                input: { normalizedText: normalized }
-            }) : null;
-
-            const extracted = await this._extractFields(normalized);
-
-            if (extractSpan) extractSpan.end({ output: extracted });
-
-            // 4. CLINICAL VALIDATION ENGINE
-            const ruleSpan = trace ? trace.span({
-                name: "Clinical-Rules-Engine",
-                input: extracted
-            }) : null;
-
-            const validation = await this._runRules(extracted);
-
-            if (ruleSpan) ruleSpan.end({ output: validation });
-
-            const finalResult = {
-                confidence: Math.round(confidence),
-                ...extracted,
-                ...validation
+            return {
+                ...medicalData,
+                ...validation,
+                raw_text: combinedText
             };
 
-            if (!parentTrace && trace) trace.update({ output: finalResult });
-
-            return finalResult;
         } catch (error) {
-            if (worker) await worker.terminate();
-            console.error("[PRESCRIPTION_AGENT_ERROR]", error);
-            if (trace) trace.update({ output: error.message, level: "ERROR" });
+            console.error("[ADVANCED_AGENT_CRITICAL_FAILURE]", error);
             throw error;
         }
     }
 
-    _normalize(text) {
-        return text.toLowerCase()
-            .replace(/[^a-z0-9\s/.-]/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim();
-    }
-
-    async _extractFields(text) {
-        // A. DATE DETECTION
-        const datePattern = /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})|(\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})/;
-        const dateMatch = text.match(datePattern);
-        let issuedDate = null;
-        if (dateMatch) {
-            issuedDate = new Date(dateMatch[0].replace(/[\/\.]/g, '-'));
-            if (isNaN(issuedDate.getTime())) issuedDate = null;
+    async _extractMedicalEntities(text) {
+        if (!this.groq) {
+            return { detectedMedicines: [], dosage: "N/A", doctorName: "Unknown" };
         }
 
-        // B. MEDICINE RECOGNITION (Fuzzy + Deterministic)
-        const allMeds = await Medicine.find({});
-        const detected = [];
-        const words = text.split(' ');
+        const allMeds = await Medicine.find({}, 'name');
+        const medList = allMeds.map(m => m.name).join(', ');
 
-        for (const med of allMeds) {
-            const medName = med.name.toLowerCase();
-            const regex = new RegExp(`\\b${medName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+        const prompt = `You are a medical NLP specialist. Extract entities from this messy prescription text.
+        TEXT: "${text}"
+        VALID MEDICINES IN OUR PHARMACY: ${medList}
+        
+        Return ONLY valid JSON:
+        {
+            "detectedMedicines": ["Name1", "Name2"],
+            "dosage": "string",
+            "doctorName": "string",
+            "issuedDate": "YYYY-MM-DD"
+        }`;
 
-            if (regex.test(text)) {
-                detected.push({ name: med.name, confidence: 100 });
+        try {
+            const result = await this.groq.chat.completions.create({
+                messages: [{ role: "user", content: prompt }],
+                model: "llama-3.3-70b-versatile",
+                response_format: { type: "json_object" }
+            });
+            const data = JSON.parse(result.choices[0].message.content);
+
+            // Date Normalization to prevent Mongoose Cast Errors
+            if (data.issuedDate) {
+                const parsedDate = new Date(data.issuedDate);
+                if (isNaN(parsedDate.getTime())) {
+                    data.issuedDate = null;
+                } else {
+                    data.issuedDate = parsedDate.toISOString().split('T')[0];
+                }
             } else {
-                // Fuzzy check for OCR errors
-                for (const word of words) {
-                    if (word.length > 4 && this._levenshtein(word, medName) <= 1) {
-                        detected.push({ name: med.name, confidence: 85 });
-                        break;
-                    }
-                }
+                data.issuedDate = null;
             }
-        }
 
-        // C. DOSAGE & DOCTOR
-        const dosagePattern = /\d+\s?(mg|g|ml|tablet|cap|dose|units)|(\d+\s?times?\s?daily)/gi;
-        const dosageMatch = text.match(dosagePattern);
+            return data;
+        } catch (e) {
+            console.error("NLP Extraction Failed:", e);
+            return { detectedMedicines: [], dosage: "N/A", doctorName: "Unknown", issuedDate: null };
+        }
+    }
+
+    async _runClinicalValidation(entities, ocrConfidence) {
+        const validator = require('../utils/PrescriptionValidator');
+        const report = await validator.validate(entities, ocrConfidence * 100);
+
+        let finalStatus = report.status;
+        if (report.status === 'ACCEPTED') finalStatus = 'VERIFIED';
+        if (report.status === 'PHARMACIST_REVIEW_REQUIRED') finalStatus = 'PENDING_ADMIN_REVIEW';
+
+        let notes = report.reason || report.warnings.join(' | ') || 'Prescription clinically verified.';
 
         return {
-            detectedMedicines: [...new Set(detected.map(d => d.name))],
-            dosage: dosageMatch ? dosageMatch.join(', ') : 'Not specified',
-            issuedDate,
-            doctorName: this._findDoctor(text)
+            status: finalStatus,
+            validationNotes: notes,
+            structuredData: report,
+            confidence: Math.round(ocrConfidence * 100)
         };
     }
 
-    _findDoctor(text) {
-        const triggers = ['dr', 'doctor', 'physician', 'hospital', 'clinic', 'specialist'];
-        const words = text.split(' ');
-        for (let i = 0; i < words.length; i++) {
-            if (triggers.some(t => words[i].includes(t))) {
-                return words.slice(i, i + 3).join(' ').trim();
-            }
-        }
-        return 'Not identified';
-    }
-
-    _levenshtein(a, b) {
-        const matrix = [];
-        for (let i = 0; i <= b.length; i++) matrix[i] = [i];
-        for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
-        for (let i = 1; i <= b.length; i++) {
-            for (let j = 1; j <= a.length; j++) {
-                if (b.charAt(i - 1) === a.charAt(j - 1)) matrix[i][j] = matrix[i - 1][j - 1];
-                else matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j] + 1);
-            }
-        }
-        return matrix[b.length][a.length];
-    }
-
-    /**
-     * DYNAMIC RULES ENGINE
-     * Implements Stock -> Tag -> Expiry -> Completeness
-     */
-    async _runRules(extracted) {
-        const logs = [];
-        let status = 'PENDING_ADMIN_REVIEW'; // Default to admin review for all valid matches
-
-        // 1. INVENTORY SYNC (THE ONLY REJECTION CASE)
-        if (extracted.detectedMedicines.length === 0) {
-            return {
-                status: 'REJECTED',
-                validationNotes: 'REJECTED: No medicine recognized from prescription document.',
-                medicineValidation: {
-                    isValid: false,
-                    reason: 'NO_MEDICINES_DETECTED',
-                    detectedCount: 0
-                }
-            };
-        }
-
-        const med = await Medicine.findOne({ name: extracted.detectedMedicines[0] });
-
-        // 2. STOCK VALIDATION (Log only)
-        if (med && med.stock <= 0) {
-            logs.push(`ALERT: ${med.name} is out of stock.`);
-        }
-
-        // 3. TAG VALIDATION (Log only)
-        if (med && !med.prescriptionRequired) {
-            logs.push(`NOTE: ${med.name} is OTC.`);
-        }
-
-        // 4. EXPIRY VALIDATION (Log only)
-        if (extracted.issuedDate) {
-            const age = Math.ceil(Math.abs(new Date() - extracted.issuedDate) / (1000 * 60 * 60 * 24));
-            if (age > this.EXPIRY_DAYS) {
-                logs.push(`WARN: Prescription appears expired (${age} days old).`);
-            }
-        } else {
-            logs.push('WARN: Issued date not found.');
-        }
-
-        // 5. CLINICAL COMPLETENESS (Log only)
-        if (extracted.doctorName === 'Not identified') {
-            logs.push('INFO: Doctor identifier missing.');
-        }
-
-        logs.push('SYSTEM: Sent for Pharmacist verification.');
-
-        return {
-            status,
-            validationNotes: logs.join(' | '),
-            medicineValidation: {
-                isValid: true,
-                reason: 'MEDICINES_DETECTED',
-                detectedCount: extracted.detectedMedicines.length
-            }
-        };
-    }
-
-    /**
-     * NEW: Validate if requested medicine is in the prescription
-     * Used to verify prescription actually mentions the medicine being verified
-     */
     async validateMedicineInPrescription(medicineId, extractedMedicines) {
         try {
-            // Get requested medicine details
             const requestedMedicine = await Medicine.findById(medicineId);
-            if (!requestedMedicine) {
-                return { isValid: false, reason: 'MEDICINE_NOT_FOUND' };
-            }
+            if (!requestedMedicine) return { isValid: false, reason: 'MEDICINE_NOT_FOUND' };
 
-            if (!extractedMedicines || extractedMedicines.length === 0) {
-                return { isValid: false, reason: 'NO_MEDICINES_IN_PRESCRIPTION' };
-            }
+            const requestedName = requestedMedicine.name.toLowerCase();
+            const extractedNames = (extractedMedicines || []).map(m => m.toLowerCase());
+            const altNames = (requestedMedicine.alternateNames || []).map(a => a.toLowerCase());
 
-            // Exact match
-            const exactMatch = extractedMedicines.some(med =>
-                med.toLowerCase() === requestedMedicine.name.toLowerCase()
+            const isMatch = extractedNames.some(ext =>
+                ext === requestedName ||
+                altNames.includes(ext)
             );
-            if (exactMatch) {
-                return { isValid: true, reason: 'EXACT_MATCH', matchedMedicine: requestedMedicine.name };
-            }
 
-            // Fuzzy match (similar names - OCR errors)
-            const fuzzyMatch = extractedMedicines.find(med => {
-                const distance = this._levenshtein(
-                    med.toLowerCase(),
-                    requestedMedicine.name.toLowerCase()
-                );
-                return distance <= 2; // Allow up to 2 character differences
-            });
-            if (fuzzyMatch) {
-                return { isValid: true, reason: 'FUZZY_MATCH', matchedMedicine: fuzzyMatch };
-            }
-
-            // Check alternative names / synonyms
-            const altNames = requestedMedicine.alternateNames || [];
-            const altMatch = extractedMedicines.some(med =>
-                altNames.some(alt => alt.toLowerCase() === med.toLowerCase())
-            );
-            if (altMatch) {
-                return { isValid: true, reason: 'ALTERNATE_NAME_MATCH', matchedMedicine: requestedMedicine.name };
-            }
-
-            // No match found
             return {
-                isValid: false,
-                reason: 'MEDICINE_MISMATCH',
-                requestedMedicine: requestedMedicine.name,
+                isValid: isMatch,
+                reason: isMatch ? 'SUCCESS' : 'MEDICINE_NOT_MENTIONED',
+                target: requestedMedicine.name,
                 detectedMedicines: extractedMedicines
             };
         } catch (error) {
-            console.error('[PRESCRIPTION_AGENT] Validation error:', error);
-            return { isValid: false, reason: 'VALIDATION_ERROR', error: error.message };
+            console.error('[MEDICINE_VALIDATION_ERROR]', error);
+            return { isValid: false, reason: 'VALIDATION_FAILED' };
         }
+    }
+
+    async _getPythonAI(imagePath) {
+        const formData = new FormData();
+        formData.append('file', fs.createReadStream(imagePath));
+        const res = await axios.post('http://localhost:8000/process-prescription', formData, {
+            headers: { ...formData.getHeaders() },
+            timeout: 60000
+        });
+        return res.data;
     }
 }
 

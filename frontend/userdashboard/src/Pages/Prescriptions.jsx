@@ -4,7 +4,7 @@ import {
     Upload, FileText, CheckCircle2, AlertCircle,
     Loader2, Sparkles, Clock, History, Search,
     Eye, Calendar, ArrowRight, ShieldCheck, Trash2,
-    FileSearch, AlertTriangle, RefreshCw, X
+    FileSearch, AlertTriangle, RefreshCw, X, ClipboardList
 } from 'lucide-react';
 import { Card, Button, Badge, Toast } from '../Component/UI';
 import { medicineAPI, prescriptionAPI, stockAlertAPI } from '../services/api';
@@ -24,6 +24,8 @@ const PrescriptionsPage = () => {
     const [isUploading, setIsUploading] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [viewingInsights, setViewingInsights] = useState(null);
+    const [issuedBy, setIssuedBy] = useState('');
+    const [validTill, setValidTill] = useState('');
 
     const [showToast, setShowToast] = useState(false);
     const [toastMsg, setToastMsg] = useState('');
@@ -56,8 +58,37 @@ const PrescriptionsPage = () => {
 
     const handleUpload = async (e) => {
         e.preventDefault();
-        if (!selectedMedicine || !file) {
-            setToastMsg("Please search/select a medicine and attach a file.");
+
+        if (!selectedMedicine || !file || !issuedBy || !validTill) {
+            setToastMsg("Please fill all fields and attach a file.");
+            setToastType('error');
+            setShowToast(true);
+            return;
+        }
+
+        // Issued By check
+        if (issuedBy.trim().length < 3) {
+            setToastMsg("Issued By must be at least 3 characters.");
+            setToastType('error');
+            setShowToast(true);
+            return;
+        }
+
+        // Date check
+        const pickedDate = new Date(validTill);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        if (pickedDate <= today) {
+            setToastMsg("Validity must be a future date.");
+            setToastType('error');
+            setShowToast(true);
+            return;
+        }
+
+        // File type check
+        const allowedTypes = ['image/jpeg', 'image/png', 'application/pdf', 'image/webp'];
+        if (!allowedTypes.includes(file.type)) {
+            setToastMsg("Invalid file type. (JPG, PNG, WEBP or PDF only)");
             setToastType('error');
             setShowToast(true);
             return;
@@ -67,6 +98,8 @@ const PrescriptionsPage = () => {
         const formData = new FormData();
         formData.append('userId', user.id);
         formData.append('medicineId', selectedMedicine._id);
+        formData.append('issuedBy', issuedBy);
+        formData.append('validTill', validTill);
         formData.append('prescription', file);
 
         try {
@@ -77,6 +110,8 @@ const PrescriptionsPage = () => {
             setFile(null);
             setSelectedMedicine(null);
             setSearchTerm('');
+            setIssuedBy('');
+            setValidTill('');
             fetchPrescriptions();
         } catch (err) {
             setToastMsg(err.response?.data?.error || "Upload failed");
@@ -113,24 +148,129 @@ const PrescriptionsPage = () => {
     };
 
     return (
-        <div className="p-8 max-w-6xl mx-auto space-y-10">
-            {/* Minimal Header */}
-            <div className="flex justify-between items-center">
-                <div>
-                    <h2 className="text-3xl font-black tracking-tight text-brand-text-primary">Clinical Verification</h2>
-                    <p className="text-sm font-medium opacity-40 text-brand-text-secondary uppercase tracking-widest mt-1">AI-Powered Prescription Portal</p>
+        <>
+            <div className="p-8 max-w-6xl mx-auto space-y-10">
+                {/* Minimal Header */}
+                <div className="flex justify-between items-center">
+                    <div>
+                        <h2 className="text-3xl font-black tracking-tight text-brand-text-primary">Clinical Verification</h2>
+                        <p className="text-sm font-medium opacity-40 text-brand-text-secondary uppercase tracking-widest mt-1">AI-Powered Prescription Portal</p>
+                    </div>
+                    <button
+                        onClick={fetchPrescriptions}
+                        className="p-3 bg-brand-card border border-brand-border-color rounded-xl text-brand-text-secondary hover:text-brand-primary transition-all active:scale-95 shadow-sm"
+                    >
+                        <RefreshCw size={18} className={isLoading ? 'animate-spin' : ''} />
+                    </button>
                 </div>
-                <button
-                    onClick={fetchPrescriptions}
-                    className="p-3 bg-brand-card border border-brand-border-color rounded-xl text-brand-text-secondary hover:text-brand-primary transition-all active:scale-95 shadow-sm"
-                >
-                    <RefreshCw size={18} className={isLoading ? 'animate-spin' : ''} />
-                </button>
-            </div>
 
-            <div className="space-y-4">
-                {/* Verification History */}
-                <div className="space-y-4">
+                {/* NEW UPLOAD SECTION */}
+                <Card className="p-8 border-brand-primary/20 bg-brand-primary/5 shadow-xl relative overflow-hidden">
+                    <div className="flex items-center space-x-3 mb-6">
+                        <div className="p-2 bg-brand-primary text-white rounded-lg">
+                            <Upload size={18} />
+                        </div>
+                        <div>
+                            <h3 className="font-black text-lg">Upload New Prescription</h3>
+                            <p className="text-[10px] uppercase font-bold opacity-40">AI-Assisted Processing</p>
+                        </div>
+                    </div>
+
+                    <form onSubmit={handleUpload} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+                        {/* Medicine Search/Select */}
+                        <div className="space-y-1.5 relative">
+                            <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1">Relates to Medicine</label>
+                            <div className="relative">
+                                <input
+                                    type="text"
+                                    value={searchTerm}
+                                    onChange={(e) => {
+                                        setSearchTerm(e.target.value);
+                                        setIsDropdownOpen(true);
+                                    }}
+                                    onFocus={() => setIsDropdownOpen(true)}
+                                    placeholder="Search medicine..."
+                                    className="w-full bg-brand-card border border-brand-border-color rounded-xl px-4 py-3 text-sm focus:border-brand-primary transition-all pr-10"
+                                />
+                                <Search className="absolute right-3 top-1/2 -translate-y-1/2 opacity-20" size={16} />
+
+                                {isDropdownOpen && searchTerm && (
+                                    <div className="absolute top-full left-0 w-full mt-1 bg-brand-card border border-brand-border-color rounded-xl shadow-2xl z-[100] max-h-48 overflow-y-auto overflow-x-hidden">
+                                        {medicines
+                                            .filter(m => m.name.toLowerCase().includes(searchTerm.toLowerCase()))
+                                            .map(m => (
+                                                <button
+                                                    key={m._id}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setSelectedMedicine(m);
+                                                        setSearchTerm(m.name);
+                                                        setIsDropdownOpen(false);
+                                                    }}
+                                                    className="w-full text-left px-4 py-3 text-xs font-bold hover:bg-brand-primary hover:text-white transition-colors flex items-center justify-between"
+                                                >
+                                                    <span>{m.name}</span>
+                                                    <Badge variant="secondary" className="text-[8px]">{m.dosage}</Badge>
+                                                </button>
+                                            ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Issued By */}
+                        <div className="space-y-1.5">
+                            <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1">Issued By (Doctor)</label>
+                            <input
+                                type="text"
+                                value={issuedBy}
+                                onChange={(e) => setIssuedBy(e.target.value)}
+                                placeholder="Dr. Name / Clinic"
+                                className="w-full bg-brand-card border border-brand-border-color rounded-xl px-4 py-3 text-sm focus:border-brand-primary transition-all"
+                            />
+                        </div>
+
+                        {/* Valid Till */}
+                        <div className="space-y-1.5">
+                            <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1">Valid Until</label>
+                            <input
+                                type="date"
+                                value={validTill}
+                                onChange={(e) => setValidTill(e.target.value)}
+                                className="w-full bg-brand-card border border-brand-border-color rounded-xl px-4 py-3 text-sm focus:border-brand-primary transition-all [color-scheme:dark]"
+                            />
+                        </div>
+
+                        {/* File & Submit */}
+                        <div className="flex items-center gap-2">
+                            <label className="flex-1 relative cursor-pointer group">
+                                <input
+                                    type="file"
+                                    className="hidden"
+                                    onChange={(e) => setFile(e.target.files[0])}
+                                    accept="image/*,.pdf"
+                                />
+                                <div className={`flex items-center justify-center space-x-2 py-3 border-2 border-dashed rounded-xl transition-all ${file ? 'border-brand-primary bg-brand-primary/5 text-brand-primary' : 'border-brand-border-color opacity-30 group-hover:opacity-100 group-hover:border-brand-primary'}`}>
+                                    <ClipboardList size={16} />
+                                    <span className="text-[10px] font-black uppercase truncate max-w-[100px]">{file ? file.name : 'Attach'}</span>
+                                </div>
+                            </label>
+                            <button
+                                type="submit"
+                                disabled={isUploading}
+                                className="bg-brand-primary hover:bg-brand-secondary text-white p-3 rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-50"
+                            >
+                                {isUploading ? <Loader2 className="animate-spin" size={20} /> : <ArrowRight size={20} />}
+                            </button>
+                        </div>
+                    </form>
+                </Card>
+
+                <div className="space-y-6">
+                    <div className="flex items-center space-x-2 px-2">
+                        <History size={16} className="text-brand-primary" />
+                        <h3 className="font-black text-sm uppercase tracking-widest opacity-40">Verification History</h3>
+                    </div>
                     {isLoading ? (
                         <div className="flex flex-col items-center justify-center py-20 space-y-4">
                             <Loader2 className="animate-spin text-brand-primary opacity-20" size={32} />
@@ -142,7 +282,7 @@ const PrescriptionsPage = () => {
                                 <FileSearch size={32} />
                             </div>
                             <h4 className="font-bold text-lg mb-1 opacity-60">No Clinical Records Found</h4>
-                            <p className="text-sm opacity-30 max-w-xs mx-auto">Upload your document to the left to begin autonomous safety verification.</p>
+                            <p className="text-sm opacity-30 max-w-xs mx-auto">Upload your document above to begin autonomous safety verification.</p>
                         </Card>
                     ) : (
                         <div className="space-y-4">
@@ -159,7 +299,7 @@ const PrescriptionsPage = () => {
                                             {/* Media Preview */}
                                             <div className="w-16 h-16 rounded-2xl overflow-hidden bg-brand-background flex-shrink-0 border border-brand-border-color p-1">
                                                 <img
-                                                    src={`http://localhost:5000${presc.imageUrl}`}
+                                                    src={presc.imageUrl.startsWith('http') ? presc.imageUrl : `http://localhost:5000${presc.imageUrl}`}
                                                     className="w-full h-full object-cover rounded-xl opacity-80 group-hover:opacity-100 transition-opacity"
                                                 />
                                             </div>
@@ -215,7 +355,7 @@ const PrescriptionsPage = () => {
                                                     <FileSearch size={16} />
                                                 </button>
                                                 <a
-                                                    href={`http://localhost:5000${presc.imageUrl}`}
+                                                    href={presc.imageUrl.startsWith('http') ? presc.imageUrl : `http://localhost:5000${presc.imageUrl}`}
                                                     target="_blank"
                                                     rel="noreferrer"
                                                     className="p-3 bg-brand-hover-tint text-brand-text-secondary rounded-xl hover:text-brand-primary transition-all hover:bg-brand-primary/10"
@@ -274,7 +414,7 @@ const PrescriptionsPage = () => {
                 type={toastType}
                 onClose={() => setShowToast(false)}
             />
-        </div >
+        </>
     );
 };
 
