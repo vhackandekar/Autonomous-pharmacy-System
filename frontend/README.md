@@ -1,16 +1,27 @@
-# React + Vite
+# 🌐 Autonomous Pharmacy Frontend ecosystem
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This directory contains the patient-facing applications and portals for the Autonomous Pharmacy System, designed with a focus on modern user experience and cinematic interactions.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## 📂 Portals
 
-## React Compiler
+### [User Dashboard](file:///c:/Users/PRERNA/OneDrive/Desktop/Folder-hackFusion/frontend/userdashboard)
+The primary patient interface for uploading prescriptions, tracking orders, and managing health profiles.
+- **Tech Stack**: React v19, Tailwind CSS, Vite v7.
+- **Key Feature**: AI-assisted prescription parsing via chatbot UI.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+---
 
-## Expanding the ESLint configuration
+## 🎨 Design Philosophy
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+All frontend portals adhere to the **"Crystal Prism"** design system:
+- **Luxury Aesthetics**: Dark modes with subtle gradients and glassmorphism.
+- **Fluid Motion**: Consistent micro-animations via Framer Motion.
+- **Responsive Precision**: Pixel-perfect layouts across mobile and desktop.
+
+---
+
+<p align="center">
+  <b>Reimagining the Digital Pharmacy Interface</b>
+</p>

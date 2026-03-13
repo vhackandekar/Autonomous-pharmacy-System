@@ -1,5 +1,6 @@
 {
-  "name": "ai-pharmacy-project",
+  "name": "autonomous-pharmacy-user",
+  "description": "Premium User Dashboard for the Autonomous Pharmacy System",
   "private": true,
   "version": "0.0.0",
   "type": "module",

@@ -1,111 +1,57 @@
-# 💊 AI Pharmacy Admin Panel
+# 💎 AI Pharmacy Admin Portal
 
-A complete, production-ready admin dashboard for AI Pharmacy built with React + Vite.
+A high-fidelity, production-grade administrative dashboard designed for clinical precision and real-time oversight of the Autonomous Pharmacy ecosystem.
 
-## ✨ Features
+---
 
-- **Dashboard** — Real-time stats, revenue charts, recent orders, refill alerts
-- **Inventory** — Full CRUD for medicines, stock tracking, prescription flags
-- **Orders** — Order management, status updates, detailed view
-- **Deliveries** — Shipment tracking with visual progress indicators
-- **Refill Alerts** — Stock alerts, patient notifications, auto-send
-- **AI Agent Chat** — Chat with AI pharmacy assistant with intent detection
-- **Settings** — Profile, notifications, security, API config
+## 🌟 Overview
+
+The **Admin Portal** provides pharmacists and clinical staff with a powerful command center to manage inventory, track orders, and interact with the AI-driven recognition engine. Built with a focus on "Crystal Prism" aesthetics, it offers a luxurious and efficient user experience.
+
+### Key Modules
+- **📊 Interactive Dashboard**: Real-time sales analytics, revenue trends, and refill alerts powered by Recharts.
+- **📦 Smart Inventory**: Advanced CRUD operations for pharmaceutical stock with low-stock predictive triggers.
+- **📑 Order Fulfillment**: Real-time order tracking with Socket.IO integration for instant status updates.
+- **🤖 Agentic Chat**: Integrated AI pharmacy assistant with intent detection for rapid query resolution.
+- **🚚 Logistics Insight**: Visual progress monitors for shipment and delivery tracking.
+
+---
+
+## 🏗️ Architecture
+
+The portal is built using a modern React + Vite stack with a focus on performance and maintainable component structure:
+- **State Management**: Context API for synchronized auth and data states.
+- **Animations**: Framer Motion for cinematic page transitions and interactive micro-animations.
+- **Icons**: Lucide React for consistent, high-quality iconography.
+
+---
 
 ## 🚀 Quick Start
 
-### Step 1: Create the project directory
+### Installation
 ```bash
-mkdir pharmacy-admin && cd pharmacy-admin
-```
-
-### Step 2: Copy all source files (or clone repo)
-> Place all the provided source files in the directory structure below.
-
-### Step 3: Install dependencies
-```bash
+# Install dependencies
 npm install
-```
 
-### Step 4: Start development server
-```bash
+# Start development server
 npm run dev
 ```
 
-App runs at: **http://localhost:3000**
+### URL
+Default: **http://localhost:3000** (configured in Vite)
 
 ---
 
-## 📁 Project Structure
+## 🔗 Integration
 
-```
-pharmacy-admin/
-├── index.html
-├── vite.config.js
-├── package.json
-└── src/
-    ├── main.jsx
-    ├── App.jsx
-    ├── index.css
-    ├── context/
-    │   └── AuthContext.jsx
-    ├── components/
-    │   ├── Layout.jsx
-    │   ├── Sidebar.jsx
-    │   └── Topbar.jsx
-    ├── pages/
-    │   ├── Login.jsx
-    │   ├── Dashboard.jsx
-    │   ├── Inventory.jsx
-    │   ├── Orders.jsx
-    │   ├── Deliveries.jsx
-    │   ├── RefillAlerts.jsx
-    │   ├── AgentChat.jsx
-    │   └── Settings.jsx
-    └── utils/
-        └── api.js
-```
+The portal is pre-configured to communicate with the central API at `http://localhost:5000/api`. It includes sophisticated **mock data fallbacks**, allowing for full UI demonstration even without a running backend.
+
+### Credentials
+- **Admin Email**: `admin@pharmacy.com`
+- **Password**: `admin123`
 
 ---
 
-## 🔗 Backend Integration
-
-The app connects to your backend at `http://localhost:5000/api`.
-
-All API calls are in `src/utils/api.js`. The app includes **mock data fallbacks** so the UI works even without the backend running.
-
-### Test Login (when backend is running):
-- Email: `admin@pharmacy.com`
-- Password: `admin123`
-
-### Demo Mode (no backend):
-Just open the app — it will use mock data automatically. Navigate to any page and all functionality is demonstrated.
-
----
-
-## 📦 Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| react-router-dom | Page routing |
-| recharts | Dashboard charts |
-| lucide-react | Icons |
-| axios | API calls |
-| react-hot-toast | Notifications |
-
----
-
-## 🎨 Theme
-
-Dark navy theme matching the original design:
-- Primary Background: `#0f1117`
-- Card Background: `#1c2333`
-- Accent Green (brand): `#22c55e`
-- Fonts: Syne (headings) + DM Sans (body)
-
-## 🛠️ Build for Production
-
-```bash
-npm run build
-npm run preview
-```
+<p align="center">
+  <b>Defining the Future of Clinical Management</b>
+</p>

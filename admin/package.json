@@ -1,5 +1,6 @@
 {
-  "name": "pharmacy-admin",
+  "name": "autonomous-pharmacy-admin",
+  "description": "Premium Admin Portal for the Autonomous Pharmacy System",
   "private": true,
   "version": "0.0.0",
   "type": "module",
