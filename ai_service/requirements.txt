@@ -11,3 +11,5 @@ torchaudio
 pillow
 python-multipart
 python-dotenv
+sentencepiece
+protobuf
