@@ -7,7 +7,7 @@ import html2canvas from 'html2canvas';
 import { LineChart, Line, BarChart as ReBarChart, Bar, PieChart as RePieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { useNavigate } from 'react-router-dom';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const API_URL = import.meta.env.VITE_API_BASE || 'http://localhost:5000/api';
 
 const quickActions = [
     { label: 'Monthly Report', icon: FileText, color: '#3b82f6' },
