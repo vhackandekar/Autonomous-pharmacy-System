@@ -33,9 +33,9 @@ logger.info(f"Using device: {device}")
 logger.info("Loading OCR Detection (EasyOCR)...")
 reader = easyocr.Reader(['en'], gpu=(device == 'cuda'))
 
-logger.info("Loading OCR Recognition (TrOCR)...")
-processor = TrOCRProcessor.from_pretrained("microsoft/trocr-base-handwritten")
-model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-base-handwritten").to(device)
+logger.info("Loading OCR Recognition (TrOCR Small)...")
+processor = TrOCRProcessor.from_pretrained("microsoft/trocr-small-handwritten")
+model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-small-handwritten").to(device)
 
 def enhance_image(image_path):
     """
