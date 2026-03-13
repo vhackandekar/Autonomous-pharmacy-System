@@ -10,6 +10,7 @@ from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 from PIL import Image
 import torch
 import logging
+import gc
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO)
@@ -71,6 +72,14 @@ async def process_prescription(file: UploadFile = File(...)):
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
+        # 0. Resize Image to save RAM
+        logger.info("Resizing image for memory efficiency...")
+        with Image.open(temp_path) as img:
+            img.thumbnail((1000, 1000), Image.Resampling.LANCZOS)
+            img.save(temp_path, optimize=True, quality=85)
+        
+        gc.collect()
+
         # 1. Enhancement (OpenCV)
         logger.info("Enhancing image...")
         enhanced_path = enhance_image(temp_path)
@@ -78,16 +87,10 @@ async def process_prescription(file: UploadFile = File(...)):
 
         # 2. Text Detection (EasyOCR)
         logger.info("Detecting layout...")
-        # We use EasyOCR mainly for layout/detection here
-        detection_results = reader.readtext(processing_path)
-        
-        full_text = []
-        raw_lines = []
+        detection_results = reader.readtext(processing_path, detail=0) # detail=0 saves RAM
+        gc.collect()
         
         # 3. Text Recognition (TrOCR Focus)
-        # For the highest accuracy, we would crop boxes and pass to TrOCR
-        # For this MVP, we use EasyOCR for speed and TrOCR for the full document context
-        
         logger.info("Running TrOCR Recognition...")
         image = Image.open(processing_path).convert("RGB")
         pixel_values = processor(images=image, return_tensors="pt").pixel_values.to(device)
@@ -95,13 +98,15 @@ async def process_prescription(file: UploadFile = File(...)):
         generated_ids = model.generate(pixel_values)
         trocr_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
         
+        gc.collect()
+
         # Combine results
-        primary_text = " ".join([res[1] for res in detection_results])
+        primary_text = " ".join(detection_results)
         
         return {
             "success": True,
             "raw_text": f"{primary_text} {trocr_text}".strip(),
-            "confidence": 0.92, # Estimated sum
+            "confidence": 0.92,
             "engine": "Hybrid-OpenCV-TrOCR"
         }
 
