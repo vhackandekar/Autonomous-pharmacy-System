@@ -112,7 +112,7 @@ export default function AgentChat() {
   }, [messages]);
 
   useEffect(() => {
-    getAgentLogs().then(res => setLogs(res.data || [])).catch(() => setLogs([]));
+    getAgentLogs().then(res => setLogs(res.data.logs || res.data || [])).catch(() => setLogs([]));
   }, []);
 
   const detectIntent = (msg) => {
@@ -375,17 +375,21 @@ export default function AgentChat() {
 
   const handleAddVendor = async (e) => {
     e.preventDefault();
+
+    // Validate inputs
+    if (!vendorForm.name.trim()) return toast.error('Vendor name is required');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(vendorForm.email)) return toast.error('Valid email required');
+    if (vendorForm.phone.trim().length < 10) return toast.error('Valid phone number (min 10 digits) required');
+
     try {
       await addVendor(vendorForm);
-      toast.success('Vendor added!');
+      toast.success('Vendor registered successfully!');
       setVendorForm({ name: '', email: '', phone: '', address: '' });
       setShowVendorModal(false);
       await fetchData?.();
-    } catch {
-      toast.success('Vendor added (demo)!');
-      setVendorForm({ name: '', email: '', phone: '', address: '' });
-      setShowVendorModal(false);
-      await fetchData?.();
+    } catch (err) {
+      const errorMsg = err.response?.data?.error || 'Failed to add vendor';
+      toast.error(errorMsg);
     }
   };
 

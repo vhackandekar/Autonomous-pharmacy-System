@@ -24,6 +24,7 @@ class PredictiveRefillAgent {
 
             // Find orders for the user
             let history = await Order.find({ userId });
+            console.log(`[PredictiveRefillAgent] Found ${history?.length || 0} orders for user ${userId}`);
 
             if (!history || history.length === 0) {
                 console.log(`[PredictiveRefillAgent] ❌ No orders found for user ${userId}`);
@@ -138,6 +139,8 @@ class PredictiveRefillAgent {
 
                 if (existingAlert && existingAlert.notified) continue;
 
+                console.log(`[PredictiveRefillAgent] Checking alert for ${pred.medicineName}: ${pred.daysLeft} days left, overdue: ${pred.isOverdue}`);
+
                 if (pred.daysLeft <= 2 || pred.isOverdue) {
                     const medicine = await Medicine.findById(medId);
                     const isChronic = medicine?.isChronic || false;
@@ -149,8 +152,15 @@ class PredictiveRefillAgent {
                         { upsert: true }
                     );
 
+                    // Respect User Preference: Stop notifications if refillAlerts is disabled
+                    if (userObj && userObj.refillAlerts === false) {
+                        console.log(`[PredictiveRefillAgent] Skipping notification for ${userObj.name} (Refill Alerts Disabled)`);
+                        continue;
+                    }
+
                     const webhookUrl = process.env.N8N_REFILL_WEBHOOK_URL;
                     if (webhookUrl) {
+                        console.log(`[PredictiveRefillAgent] 🚀 Triggering n8n Refill Webhook for ${pred.medicineName}...`);
                         axios.post(webhookUrl, {
                             userId: userId.toString(),
                             phone: userObj?.phone || 'N/A',
@@ -158,7 +168,9 @@ class PredictiveRefillAgent {
                             daysLeft: pred.daysLeft,
                             isOverdue: pred.isOverdue,
                             predictedRefillDate: pred.refillDate
-                        }).catch(err => console.error(`[PredictiveRefillAgent] Webhook failed: ${err.message}`));
+                        })
+                            .then(() => console.log(`[PredictiveRefillAgent] ✅ Webhook Triggered Successfully for ${pred.medicineName}`))
+                            .catch(err => console.error(`[PredictiveRefillAgent] Webhook failed for ${pred.medicineName}: ${err.message}`));
                     }
 
                     const personalizedHeader = isBPorSugar ? "🩺 Vital Health Reminder: " : (isChronic ? "💊 Regular Refill Alert: " : "");
@@ -170,8 +182,16 @@ class PredictiveRefillAgent {
                         message: `${urgency}You have ${pred.daysLeft} days of ${pred.medicineName} left. Based on your history, it's time to refill!`
                     }).save();
 
+                    const adminNotif = await new Notification({
+                        userId,
+                        recipientRole: 'ADMIN',
+                        type: 'refill',
+                        message: `Urgent Refill Required: ${userObj?.name} is running low on ${pred.medicineName} (${pred.daysLeft} days left).`
+                    }).save();
+
                     if (global.io) {
-                        global.io.to('admin').emit('refill_alert_admin', { ...notif.toObject(), userId: userObj });
+                        global.io.to('admin').emit('refill_alert_admin', { ...adminNotif.toObject(), userId: userObj });
+                        global.io.to(String(userId)).emit('notification', notif);
                         global.io.to(String(userId)).emit('refill_message', { message: notif.message, notification: notif });
                     }
                 }

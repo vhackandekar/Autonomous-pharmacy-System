@@ -7,7 +7,7 @@ import {
     FileSearch, AlertTriangle, RefreshCw, X, ClipboardList
 } from 'lucide-react';
 import { Card, Button, Badge, Toast } from '../Component/UI';
-import { medicineAPI, prescriptionAPI, stockAlertAPI } from '../services/api';
+import { medicineAPI, prescriptionAPI, stockAlertAPI, BACKEND_URL } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
@@ -34,7 +34,7 @@ const PrescriptionsPage = () => {
     const fetchPrescriptions = async () => {
         try {
             const { data } = await prescriptionAPI.getMy();
-            setPrescriptions(data);
+            setPrescriptions(data.prescriptions || []);
         } catch (err) {
             console.error("Failed to fetch prescriptions:", err);
         } finally {
@@ -45,7 +45,7 @@ const PrescriptionsPage = () => {
     const fetchMedicines = async () => {
         try {
             const { data } = await medicineAPI.getAll();
-            setMedicines(data);
+            setMedicines(data.medicines || []);
         } catch (err) {
             console.error("Failed to fetch medicines:", err);
         }
@@ -299,7 +299,7 @@ const PrescriptionsPage = () => {
                                             {/* Media Preview */}
                                             <div className="w-16 h-16 rounded-2xl overflow-hidden bg-brand-background flex-shrink-0 border border-brand-border-color p-1">
                                                 <img
-                                                    src={presc.imageUrl.startsWith('http') ? presc.imageUrl : `http://localhost:5000${presc.imageUrl}`}
+                                                    src={presc.imageUrl.startsWith('http') ? presc.imageUrl : `${BACKEND_URL}${presc.imageUrl}`}
                                                     className="w-full h-full object-cover rounded-xl opacity-80 group-hover:opacity-100 transition-opacity"
                                                 />
                                             </div>
@@ -355,7 +355,7 @@ const PrescriptionsPage = () => {
                                                     <FileSearch size={16} />
                                                 </button>
                                                 <a
-                                                    href={presc.imageUrl.startsWith('http') ? presc.imageUrl : `http://localhost:5000${presc.imageUrl}`}
+                                                    href={presc.imageUrl.startsWith('http') ? presc.imageUrl : `${BACKEND_URL}${presc.imageUrl}`}
                                                     target="_blank"
                                                     rel="noreferrer"
                                                     className="p-3 bg-brand-hover-tint text-brand-text-secondary rounded-xl hover:text-brand-primary transition-all hover:bg-brand-primary/10"

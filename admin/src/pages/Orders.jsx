@@ -42,7 +42,7 @@ export default function Orders() {
 
   // Use polling hook for real-time order updates (every 5 seconds - more urgent)
   const { data: ordersData, loading, error, refetch } = usePollingData(
-    () => getAllOrders().then(res => res.data),
+    () => getAllOrders().then(res => res.data.success ? res.data.orders : res.data),
     5000,
     true,
     []

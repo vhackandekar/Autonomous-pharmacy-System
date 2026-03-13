@@ -1,6 +1,7 @@
 import axios from 'axios';
 
 const BASE_URL = import.meta.env.VITE_API_BASE || 'http://localhost:5000/api';
+export const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
 
 const api = axios.create({ baseURL: BASE_URL });
 
@@ -18,10 +19,21 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => {
     console.log(`✅ API Response: ${res.status} ${res.config.url}`);
+
+    // Unwrap the standardized envelope { success: true, data: { ... } }
+    if (res.data && res.data.success && res.data.data) {
+      const unwrapped = res.data.data;
+      if (typeof unwrapped === 'object' && unwrapped !== null) {
+        // Ensure success flag is preserved for legacy checks
+        unwrapped.success = true;
+        res.data = unwrapped;
+      }
+    }
+
     return res;
   },
   (err) => {
-    const errorMsg = err.response?.data?.error || err.message;
+    const errorMsg = err.response?.data?.message || err.response?.data?.error || err.message;
     const status = err.response?.status || 'unknown';
     console.error(`❌ API Error: ${status} ${err.config?.url} - ${errorMsg}`);
 
@@ -40,6 +52,7 @@ export const login = (data) => api.post('/auth/login', data);
 export const register = (data) => api.post('/auth/register', data);
 export const getProfile = () => api.get('/auth/profile');
 export const updateProfile = (data) => api.put('/auth/profile', data);
+export const changePassword = (data) => api.post('/auth/change-password', data);
 
 // DASHBOARD
 export const getDashboardStats = () => api.get('/admin/dashboard');

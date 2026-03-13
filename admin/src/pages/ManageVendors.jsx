@@ -25,25 +25,33 @@ export default function ManageVendors() {
   const [managingMeds, setManagingMeds] = useState(false);
 
   const { data: vendorsData, loading: vLoading, refetch: vRefetch } = usePollingData(
-    () => getVendors().then(res => res.data),
+    () => getVendors().then(res => res.data.vendors || res.data),
     10000,
     true,
     []
   );
 
   const { data: poData, loading: poLoading, refetch: poRefetch } = usePollingData(
-    () => getPurchaseOrders().then(res => res.data),
+    () => getPurchaseOrders().then(res => res.data.orders || res.data),
     15000,
     activeTab === 'purchases',
     []
   );
 
   useEffect(() => {
-    if (vendorsData && Array.isArray(vendorsData)) setVendors(vendorsData);
+    if (vendorsData && Array.isArray(vendorsData)) {
+      setVendors(vendorsData);
+    } else if (vendorsData?.vendors) {
+      setVendors(vendorsData.vendors);
+    }
   }, [vendorsData]);
 
   useEffect(() => {
-    if (poData && Array.isArray(poData)) setPurchaseOrders(poData);
+    if (poData && Array.isArray(poData)) {
+      setPurchaseOrders(poData);
+    } else if (poData?.orders) {
+      setPurchaseOrders(poData.orders);
+    }
   }, [poData]);
 
   // If we land on ai-restock tab, trigger the draft automatically
@@ -55,15 +63,24 @@ export default function ManageVendors() {
 
   const handleAdd = async (e) => {
     e.preventDefault();
+
+    // Client-side Validation Refinement
+    if (!form.name.trim()) return toast.error('Vendor name is required');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) return toast.error('Please enter a valid business email');
+    if (form.phone.trim().length < 10) return toast.error('Phone number must be at least 10 digits');
+    if (form.averageLeadTime < 1) return toast.error('Lead time must be at least 1 day');
+
     setSaving(true);
     try {
       await addVendor(form);
-      toast.success('Vendor added successfully!');
+      toast.success('Vendor registered successfully!');
       setForm({ name: '', email: '', phone: '', address: '', averageLeadTime: 3 });
       setShowModal(false);
       vRefetch();
-    } catch {
-      toast.error('Failed to add vendor');
+    } catch (err) {
+      const errorMsg = err.response?.data?.error || 'Failed to register vendor. Please try again.';
+      toast.error(errorMsg);
+      console.error('Vendor Add Error:', err);
     } finally {
       setSaving(false);
     }
@@ -171,7 +188,7 @@ export default function ManageVendors() {
     setManagingMeds(true);
     try {
       const res = await getMedicines();
-      setAllMedicines(res.data);
+      setAllMedicines(res.data.medicines || res.data);
     } catch {
       toast.error('Failed to load medicines');
     } finally {
@@ -183,9 +200,10 @@ export default function ManageVendors() {
     if (!selectedVendorForMeds) return;
     try {
       const res = await addMedicineToVendor(selectedVendorForMeds._id, [medicine._id]);
-      setSelectedVendorForMeds(res.data);
+      const updatedVendor = res.data.vendor || res.data;
+      setSelectedVendorForMeds(updatedVendor);
       // Update global vendors list to reflect change
-      setVendors(prev => prev.map(v => v._id === res.data._id ? res.data : v));
+      setVendors(prev => prev.map(v => v._id === updatedVendor._id ? updatedVendor : v));
       toast.success(`${medicine.name} added to ${selectedVendorForMeds.name}`);
     } catch (err) {
       const msg = err.response?.data?.error || err.message || 'Failed to add medicine';
@@ -198,9 +216,10 @@ export default function ManageVendors() {
     if (!selectedVendorForMeds) return;
     try {
       const res = await removeMedicineFromVendor(selectedVendorForMeds._id, medicineId);
-      setSelectedVendorForMeds(res.data);
+      const updatedVendor = res.data.vendor || res.data;
+      setSelectedVendorForMeds(updatedVendor);
       // Update global vendors list
-      setVendors(prev => prev.map(v => v._id === res.data._id ? res.data : v));
+      setVendors(prev => prev.map(v => v._id === updatedVendor._id ? updatedVendor : v));
       toast.success('Medicine removed from supplier list');
     } catch (err) {
       const msg = err.response?.data?.error || err.message || 'Failed to remove medicine';

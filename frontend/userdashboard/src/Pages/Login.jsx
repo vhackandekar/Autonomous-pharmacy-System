@@ -38,9 +38,10 @@ const Login = () => {
       const { data } = await authAPI.login({ email, password });
 
       if (data.token) {
-        // Prepare user data for context
+        // Prepare user data for context - handle both _id and id for compatibility
         const userData = {
           ...data.user,
+          id: data.user._id, // Map MongoDB _id to standard id
           initials: data.user.name.split(' ').map(n => n[0]).join('').toUpperCase(),
           role: 'User' // Default to User
         };

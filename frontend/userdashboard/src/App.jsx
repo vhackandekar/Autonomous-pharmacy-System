@@ -3,7 +3,7 @@ import Layout from './Component/Layout';
 import Login from './Pages/Login';
 import Register from './Pages/Register';
 import ForgotPassword from './Pages/ForgotPassword';
-import UserDashboard from './Pages/UserDashboard';
+import ResetPassword from './Pages/ResetPassword';
 import MyOrders from './Pages/MyOrders';
 import ChatPage from './Pages/ChatPage';
 import CartPage from './Pages/CartPage';
@@ -11,7 +11,7 @@ import SettingsPage from './Pages/Settings';
 import HistoryPage from './Pages/History';
 import PrescriptionsPage from './Pages/Prescriptions';
 import DeliveryProfilePage from './Pages/DeliveryProfilePage';
-import OrderDetails from './pages/OrderDetails';
+import OrderDetails from './Pages/OrderDetails';
 
 import { AuthProvider } from './context/AuthContext';
 import PrivateRoute from './Component/PrivateRoute';
@@ -24,6 +24,7 @@ function App() {
         <Route path="/" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password/:token" element={<ResetPassword />} />
 
         {/* Dashboard Routes wrapped in Layout and PrivateRoute */}
         <Route path="/dashboard" element={<Navigate to="/chat" replace />} />

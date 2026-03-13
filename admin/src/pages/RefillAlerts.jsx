@@ -14,7 +14,7 @@ export default function RefillAlerts() {
 
   // 1. Fetch real predictive alerts from AI Analysis
   const { data: alertData, refetch: refetchAlerts } = usePollingData(
-    () => getRefillAlerts().then(res => res.data),
+    () => getRefillAlerts().then(res => res.data.success ? res.data.alerts : res.data),
     10000,
     true,
     []
@@ -42,7 +42,7 @@ export default function RefillAlerts() {
 
   // 2. Fetch inventory for current stock list
   const { data: inventoryData, refetch: refetchInv } = usePollingData(
-    () => getInventoryDetails().then(res => res.data),
+    () => getInventoryDetails().then(res => res.data.success ? res.data.inventory : res.data),
     10000,
     true,
     []
@@ -52,16 +52,18 @@ export default function RefillAlerts() {
   useEffect(() => {
     if (inventoryData?.medicines) {
       const medicines = inventoryData.medicines;
-      setLowStock(medicines.filter(m => m.stock < 100));
+      // Use medicine-specific reorderLevel or default to 20
+      setLowStock(medicines.filter(m => m.stock < (m.reorderLevel || 20)));
 
       // Update alerts based on new medicine stock
       setAlerts(prevAlerts => prevAlerts.map(alert => {
         const med = medicines.find(m => m._id === alert.medicineId);
         if (med) {
+          const threshold = med.reorderLevel || 20;
           return {
             ...alert,
             stock: med.stock,
-            status: med.stock === 0 ? 'EMPTY' : 'LOW'
+            status: med.stock === 0 ? 'EMPTY' : (med.stock < threshold ? 'LOW' : 'STOCKED')
           };
         }
         return alert;

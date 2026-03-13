@@ -4,8 +4,6 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const cron = require('node-cron');
 const { initCronJobs } = require('./utils/cronJobs');
-const PredictiveRefillAgent = require('./Agents/PredictiveRefillAgent');
-const User = require('./schema/User');
 
 // Load env vars immediately
 dotenv.config();
@@ -59,6 +57,10 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/vendor', vendorRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/stock-alert', stockAlertRoutes);
+
+// Centralized Clinical Error Handling Middleware
+const errorMiddleware = require('./middleware/errorMiddleware');
+app.use(errorMiddleware);
 
 const port = process.env.PORT || 5000;
 //database connection – normalize URL (trim + strip quotes so .env parsing is robust)

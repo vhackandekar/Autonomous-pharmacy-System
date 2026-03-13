@@ -14,6 +14,7 @@ export default function Inventory() {
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyForm);
+  const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [showPriceModal, setShowPriceModal] = useState(false);
   const [priceForm, setPriceForm] = useState({ costPrice: 0, price: 0 });
@@ -28,7 +29,9 @@ export default function Inventory() {
 
   // Update medicines when inventory data changes
   useEffect(() => {
-    if (inventoryData?.medicines) {
+    if (inventoryData?.inventory?.medicines) {
+      setMedicines(inventoryData.inventory.medicines);
+    } else if (inventoryData?.medicines) {
       setMedicines(inventoryData.medicines);
     }
   }, [inventoryData]);
@@ -37,16 +40,11 @@ export default function Inventory() {
   const fetchMedicines = async () => {
     try {
       const res = await getMedicines();
-      setMedicines(res.data || []);
-    } catch {
-      setMedicines([
-        { _id: '1', name: 'Dolo 650', dosage: '650mg', unitType: 'tablets', stock: 100, price: 2550, prescriptionRequired: false },
-        { _id: '2', name: 'Metformin', dosage: '500mg', unitType: 'tablets', stock: 50, price: 15000, prescriptionRequired: true },
-        { _id: '3', name: 'Amoxicillin 500mg', dosage: '500mg', unitType: 'capsules', stock: 0, price: 8500, prescriptionRequired: true },
-        { _id: '4', name: 'Lisinopril 10mg', dosage: '10mg', unitType: 'tablets', stock: 85, price: 12000, prescriptionRequired: true },
-        { _id: '5', name: 'Paracetamol', dosage: '500mg', unitType: 'tablets', stock: 500, price: 1500, prescriptionRequired: false },
-        { _id: '6', name: 'Omeprazole', dosage: '20mg', unitType: 'capsules', stock: 120, price: 3200, prescriptionRequired: false },
-      ]);
+      setMedicines(res.data.medicines || res.data || []);
+    } catch (err) {
+      console.error("Critical Inventory Connection Failure:", err);
+      toast.error('Failed to connect to clinical database. Please check your connection.');
+      setMedicines([]);
     }
   };
 
@@ -91,38 +89,59 @@ export default function Inventory() {
 
   const handleSave = async (e) => {
     e.preventDefault();
+
+    // Comprehensive Client-side validation
+    const newErrors = {};
+    if (!form.name.trim()) newErrors.name = 'Medicine name is required';
+    if (!form.dosage.trim()) newErrors.dosage = 'Dosage instruction is required (e.g. 500mg)';
+
+    const stockVal = Number(form.stock);
+    const priceVal = Number(form.price);
+    const costVal = Number(form.costPrice);
+    const reorderVal = Number(form.reorderLevel) || 20;
+
+    if (isNaN(stockVal) || stockVal < 0) newErrors.stock = 'Invalid stock quantity';
+    if (isNaN(priceVal) || priceVal <= 0) newErrors.price = 'Selling price must be greater than zero';
+    if (isNaN(costVal) || costVal < 0) newErrors.costPrice = 'Cost price cannot be negative';
+
+    if (priceVal > 0 && costVal > 0 && priceVal < costVal) {
+      // Warning but not blocking - sometimes medicines are sold at loss for promotions
+      toast.error('Warning: Selling price is less than cost price', { duration: 3000 });
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      toast.error('Please resolve the highlighted errors');
+      return;
+    }
+
     setSaving(true);
     try {
-      console.log('--- SAVE START ---');
-      console.log('Form State Raw:', form);
       const payload = {
-        name: form.name,
-        dosage: form.dosage,
+        name: form.name.trim(),
+        dosage: form.dosage.trim(),
         unitType: form.unitType,
-        stock: Number(form.stock),
-        price: Number(form.price),
-        costPrice: Number(form.costPrice),
+        stock: stockVal,
+        price: priceVal,
+        costPrice: costVal,
+        reorderLevel: reorderVal,
         prescriptionRequired: !!form.prescriptionRequired
       };
-      console.log('Final Payload prepared:', payload);
-
-      console.log('Sending Update Payload:', payload);
 
       if (editing) {
-        const res = await updateMedicine(editing._id, payload);
-        setMedicines(prev => prev.map(m => m._id === editing._id ? res.data : m));
-        toast.success('Medicine updated!');
+        await updateMedicine(editing._id, payload);
+        toast.success(`${form.name} updated successfully!`);
       } else {
-        const res = await addMedicine(payload);
-        setMedicines(prev => [...prev, res.data]);
-        toast.success('Medicine added!');
+        await addMedicine(payload);
+        toast.success(`${form.name} added to inventory!`);
       }
+      setErrors({});
       setShowModal(false);
-      refetch(); // Still refetch to sync background analytics
+      refetch();
     } catch (error) {
-      console.error('Save error:', error);
-      toast.error('Failed to save changes. Please try again.');
-      setShowModal(false);
+      const msg = error.response?.data?.error || 'Failed to sync with clinical database';
+      toast.error(msg);
+      console.error('Inventory Save Error:', error);
     } finally { setSaving(false); }
   };
 
@@ -287,11 +306,27 @@ export default function Inventory() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
                 <div className="form-group" style={{ gridColumn: '1/-1' }}>
                   <label className="form-label">Medicine Name</label>
-                  <input className="form-control" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} required placeholder="e.g. Paracetamol 500mg" />
+                  <input
+                    className={`form-control ${errors.name ? 'error' : ''}`}
+                    value={form.name}
+                    onChange={e => {
+                      setForm(p => ({ ...p, name: e.target.value }));
+                      if (errors.name) setErrors(prev => ({ ...prev, name: null }));
+                    }}
+                    required
+                    placeholder="e.g. Paracetamol 500mg"
+                  />
+                  {errors.name && <span className="error-text" style={{ color: 'var(--accent-red)', fontSize: '11px' }}>{errors.name}</span>}
                 </div>
                 <div className="form-group">
                   <label className="form-label">Dosage</label>
-                  <input className="form-control" value={form.dosage} onChange={e => setForm(p => ({ ...p, dosage: e.target.value }))} required placeholder="e.g. 500mg" />
+                  <input
+                    className={`form-control ${errors.dosage ? 'error' : ''}`}
+                    value={form.dosage}
+                    onChange={e => setForm(p => ({ ...p, dosage: e.target.value }))}
+                    required
+                    placeholder="e.g. 500mg"
+                  />
                 </div>
                 <div className="form-group">
                   <label className="form-label">Unit Type</label>
@@ -304,15 +339,39 @@ export default function Inventory() {
                 </div>
                 <div className="form-group">
                   <label className="form-label">Stock (Units)</label>
-                  <input type="number" className="form-control" value={form.stock} onChange={e => setForm(p => ({ ...p, stock: e.target.value }))} required min="0" placeholder="100" />
+                  <input
+                    type="number"
+                    className={`form-control ${errors.stock ? 'error' : ''}`}
+                    value={form.stock}
+                    onChange={e => setForm(p => ({ ...p, stock: e.target.value }))}
+                    required
+                    min="0"
+                    placeholder="100"
+                  />
                 </div>
                 <div className="form-group">
                   <label className="form-label">Cost Price (₹ Buy)</label>
-                  <input type="number" className="form-control" value={form.costPrice} onChange={e => setForm(p => ({ ...p, costPrice: e.target.value }))} required min="0" placeholder="2000" />
+                  <input
+                    type="number"
+                    className={`form-control ${errors.costPrice ? 'error' : ''}`}
+                    value={form.costPrice}
+                    onChange={e => setForm(p => ({ ...p, costPrice: e.target.value }))}
+                    required
+                    min="0"
+                    placeholder="2000"
+                  />
                 </div>
                 <div className="form-group">
                   <label className="form-label">Selling Price (₹ Sell)</label>
-                  <input type="number" className="form-control" value={form.price} onChange={e => setForm(p => ({ ...p, price: e.target.value }))} required min="0" placeholder="2550" />
+                  <input
+                    type="number"
+                    className={`form-control ${errors.price ? 'error' : ''}`}
+                    value={form.price}
+                    onChange={e => setForm(p => ({ ...p, price: e.target.value }))}
+                    required
+                    min="0"
+                    placeholder="2550"
+                  />
                 </div>
               </div>
               <div className="form-group">

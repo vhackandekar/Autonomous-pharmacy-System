@@ -1,6 +1,7 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE || 'http://localhost:5000/api';
+export const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -21,11 +22,29 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
+// Add a response interceptor to handle the standardized data envelope
+api.interceptors.response.use(
+  (response) => {
+    // Unwrap the standardized envelope { success: true, data: { ... } }
+    if (response.data && response.data.success && response.data.data) {
+      const unwrapped = response.data.data;
+      if (typeof unwrapped === 'object' && unwrapped !== null) {
+        unwrapped.success = true;
+        response.data = unwrapped;
+      }
+    }
+    return response;
+  },
+  (error) => Promise.reject(error)
+);
+
 export const authAPI = {
   login: (credentials) => api.post('/auth/login', credentials),
   register: (userData) => api.post('/auth/register', userData),
   getProfile: () => api.get('/auth/profile'),
   updateProfile: (profileData) => api.put('/auth/profile', profileData),
+  forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
+  resetPassword: (token, newPassword) => api.post('/auth/reset-password', { token, newPassword }),
 };
 
 export const cartAPI = {

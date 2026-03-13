@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Mic, Globe, User, Bot, Loader2, MoreVertical, X, Paperclip, FileText, Trash2 } from 'lucide-react';
+import { Send, Mic, Globe, User, Bot, Loader2, MoreVertical, X, Paperclip, FileText, Trash2, Plus, Image, Lightbulb, Telescope, ShoppingBag, ChevronRight } from 'lucide-react';
 import { useChat } from '../context/ChatContext';
 import { useTheme } from '../context/ThemeContext';
 import api from '../services/api';
@@ -10,14 +10,16 @@ const ChatBot = ({ theme: propTheme = 'dark' }) => {
     const theme = contextTheme || propTheme;
 
     const translations = {
-        'English': { placeholder: 'Ask your healthcare assistant...', analyzing: 'Analyzing Voice...' },
-        'Hindi': { placeholder: 'अपने स्वास्थ्य सहायक से पूछें...', analyzing: 'आवाज़ का विश्लेषण...' },
-        'Marathi': { placeholder: 'तुमच्या आरोग्य सहाय्यकाला विचारा...', analyzing: 'आवाजाचे विश्लेषण सुरू आहे...' }
+        'English': { placeholder: 'Ask anything...', analyzing: 'Analyzing Voice...' },
+        'Hindi': { placeholder: 'कुछ भी पूछें...', analyzing: 'आवाज़ का विश्लेषण...' },
+        'Marathi': { placeholder: 'काहीही विचारा...', analyzing: 'आवाजाचे विश्लेषण सुरू आहे...' }
     };
     const t = translations[language] || translations['English'];
 
     const [inputValue, setInputValue] = useState('');
     const [isListening, setIsListening] = useState(false);
+    const [showUploadMenu, setShowUploadMenu] = useState(false);
+    const uploadMenuRef = useRef(null);
     // Removed local selectedLanguage state
     const [attachedFile, setAttachedFile] = useState(null);
     const [filePreview, setFilePreview] = useState(null);
@@ -25,6 +27,17 @@ const ChatBot = ({ theme: propTheme = 'dark' }) => {
     const fileInputRef = useRef(null);
     const mediaRecorder = useRef(null);
     const audioChunks = useRef([]);
+
+    // Click outside to close menu
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (uploadMenuRef.current && !uploadMenuRef.current.contains(event.target)) {
+                setShowUploadMenu(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
 
     // Auto-scroll to bottom of messages
     const scrollToBottom = () => {
@@ -209,7 +222,41 @@ const ChatBot = ({ theme: propTheme = 'dark' }) => {
                                             {msg.role === 'user' ? 'User' : 'Pharmacy Core'}
                                         </span>
                                     </div>
-                                    <p className="text-sm font-medium leading-relaxed">{msg.content}</p>
+
+                                    {/* Attachment Rendering */}
+                                    {msg.attachment && (
+                                        <div className="mb-2">
+                                            <div className="flex items-center space-x-2 text-[13px] font-bold text-white/90 mb-2">
+                                                <span>{msg.attachment.type?.startsWith('image/') ? '[Uploaded Image:' : '[Uploaded File:'} {msg.attachment.name}]</span>
+                                            </div>
+
+                                            <div className={`rounded-xl overflow-hidden border ${msg.role === 'user' ? 'bg-white/10 border-white/20' : 'bg-[#0B0A14] border-purple-500/20'}`}>
+                                                {msg.attachment.type?.startsWith('image/') ? (
+                                                    <div className="relative group/msgimg">
+                                                        <img src={msg.attachment.preview} alt="Attachment" className="max-w-full max-h-[300px] object-contain transition-transform group-hover/msgimg:scale-[1.02]" />
+                                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/msgimg:opacity-100 transition-opacity flex items-center justify-center">
+                                                            <Paperclip size={24} className="text-white" />
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex items-center p-3 space-x-3">
+                                                        <div className="p-2 rounded-lg bg-purple-500/20">
+                                                            <FileText size={20} className="text-purple-400" />
+                                                        </div>
+                                                        <div className="flex-1 min-w-0 text-white">
+                                                            <p className="text-sm font-semibold truncate">{msg.attachment.name}</p>
+                                                            <p className="text-[10px] opacity-60">{(msg.attachment.size / 1024).toFixed(1)} KB • Document</p>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Divider like in the image */}
+                                            <div className="w-full h-[1px] bg-white/10 my-3"></div>
+                                        </div>
+                                    )}
+
+                                    {msg.content && <p className="text-sm font-medium leading-relaxed">{msg.content}</p>}
                                 </div>
                             </div>
                         </div>
@@ -231,30 +278,28 @@ const ChatBot = ({ theme: propTheme = 'dark' }) => {
                 <footer className={`z-50 relative p-4 md:p-6 transition-all duration-500 ${theme === 'dark' ? 'bg-[#141225] border-t border-purple-500/20' : 'bg-white border-t border-gray-200'}`}>
                     <div className="max-w-4xl mx-auto">
 
-                        {/* File Preview Area */}
+                        {/* File Preview Area (Drafting) */}
                         {filePreview && (
-                            <div className="mb-4 animate-in slide-in-from-bottom-2 duration-300">
-                                <div className={`relative inline-block p-2 rounded-2xl border ${theme === 'dark' ? 'bg-[#1B1730] border-purple-500/30' : 'bg-blue-50 border-blue-100'}`}>
-                                    <div className="flex items-center space-x-3">
-                                        <div className="w-12 h-12 rounded-xl overflow-hidden border border-white/10">
-                                            {attachedFile?.type.startsWith('image/') ? (
-                                                <img src={filePreview} alt="Preview" className="w-full h-full object-cover" />
-                                            ) : (
-                                                <div className="w-full h-full flex items-center justify-center bg-purple-500/20">
-                                                    <FileText className="text-purple-400" size={20} />
-                                                </div>
-                                            )}
-                                        </div>
-                                        <div className="pr-8">
-                                            <p className={`text-[10px] font-black uppercase tracking-widest ${theme === 'dark' ? 'text-purple-300/60' : 'text-blue-600/60'}`}>Prescription Attached</p>
-                                            <p className="text-xs font-bold truncate max-w-[150px]">{attachedFile?.name}</p>
-                                        </div>
+                            <div className="mb-4 animate-in slide-in-from-bottom-2 duration-300 flex">
+                                <div className={`relative flex items-center p-2.5 rounded-2xl border backdrop-blur-xl ${theme === 'dark' ? 'bg-purple-500/10 border-purple-500/20 text-purple-100' : 'bg-blue-50/80 border-blue-200 text-blue-900'}`}>
+                                    <div className="w-10 h-10 rounded-xl overflow-hidden shadow-inner flex-shrink-0">
+                                        {attachedFile?.type.startsWith('image/') ? (
+                                            <img src={filePreview} alt="Preview" className="w-full h-full object-cover" />
+                                        ) : (
+                                            <div className={`w-full h-full flex items-center justify-center ${theme === 'dark' ? 'bg-purple-500/20' : 'bg-blue-100'}`}>
+                                                <FileText className={theme === 'dark' ? 'text-purple-400' : 'text-blue-500'} size={18} />
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="mx-3 pr-6 min-w-0">
+                                        <p className="text-[10px] font-bold uppercase tracking-tight opacity-50">Attachment Ready</p>
+                                        <p className="text-xs font-semibold truncate max-w-[180px]">{attachedFile?.name}</p>
                                     </div>
                                     <button
                                         onClick={clearAttachment}
-                                        className="absolute top-1 right-1 p-1 bg-rose-500 text-white rounded-lg shadow-lg hover:scale-110 transition-all"
+                                        className="absolute -top-1.5 -right-1.5 p-1 bg-red-500 text-white rounded-full shadow-lg hover:scale-110 active:scale-95 transition-all border-2 border-white/20"
                                     >
-                                        <X size={12} />
+                                        <X size={10} />
                                     </button>
                                 </div>
                             </div>
@@ -269,46 +314,98 @@ const ChatBot = ({ theme: propTheme = 'dark' }) => {
                                 accept="image/*,.pdf"
                             />
 
-                            {/* Multilingual Selector */}
-                            <div className="relative group">
+                            {/* New Professional Upload & Action Menu */}
+                            <div className="relative" ref={uploadMenuRef}>
                                 <button
                                     type="button"
-                                    className={`p-3 rounded-xl transition-all flex items-center border ${theme === 'dark' ? 'bg-[#1B1730] border-purple-500/20 text-purple-400 hover:text-purple-300 hover:border-purple-500/30 active:scale-95 shadow-lg' : 'bg-gray-50 border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-200 active:scale-95 shadow-sm'}`}
-                                    title="Switch Language"
+                                    onClick={() => setShowUploadMenu(!showUploadMenu)}
+                                    className={`w-11 h-11 rounded-full transition-all flex items-center justify-center border ${theme === 'dark'
+                                        ? 'bg-transparent border-purple-500/20 text-purple-400 hover:bg-purple-500/10'
+                                        : 'bg-transparent border-gray-200 text-gray-500 hover:bg-gray-50'} active:scale-90`}
+                                    title="Add content"
                                 >
-                                    <Globe size={20} />
+                                    {showUploadMenu ? <X size={20} /> : <Plus size={26} strokeWidth={2.5} />}
                                 </button>
-                                <div className={`absolute bottom-full left-0 mb-4 invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-all duration-300 rounded-2xl p-2 min-w-[200px] shadow-[0_20px_60px_rgba(0,0,0,0.7)] z-[9999] ${theme === 'dark' ? 'bg-[#1B1730] border border-purple-500/40 backdrop-blur-3xl' : 'bg-white border border-gray-200 shadow-2xl'}`}>
-                                    <div className={`px-3 py-1.5 mb-2 border-b ${theme === 'dark' ? 'border-purple-500/10' : 'border-gray-100'}`}>
-                                        <p className={`text-[10px] font-black uppercase tracking-widest ${theme === 'dark' ? 'text-purple-300/40' : 'text-gray-400'}`}>Select Language</p>
-                                    </div>
-                                    {['English', 'Hindi', 'Marathi', 'Bengali', 'Tamil', 'Telugu', 'Kannada', 'Gujarati', 'Malayalam', 'Punjabi', 'Odia'].map(lang => (
-                                        <button
-                                            key={lang}
-                                            type="button"
-                                            onClick={() => setLanguage(lang)}
-                                            className={`w-full text-left px-3 py-2 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all duration-200 mb-0.5 ${language === lang ? (theme === 'dark' ? 'bg-gradient-to-r from-purple-500/20 to-purple-500/10 text-purple-300 border border-purple-500/30' : 'bg-blue-100 text-blue-600') : (theme === 'dark' ? 'text-purple-300/60 hover:text-purple-300 hover:bg-purple-500/10' : 'text-slate-700 hover:bg-blue-50')}`}
-                                        >
-                                            <div className="flex items-center justify-between">
-                                                {lang}
-                                                {language === lang && <div className={`w-1 h-1 rounded-full ${theme === 'dark' ? 'bg-purple-400 shadow-[0_0_8px_rgba(167,139,250,0.8)]' : 'bg-blue-500'}`} />}
+
+                                {showUploadMenu && (
+                                    <div className={`absolute bottom-full left-0 mb-4 animate-in fade-in slide-in-from-bottom-4 duration-300 rounded-[28px] p-2 min-w-[280px] shadow-[0_10px_40px_rgba(0,0,0,0.5)] z-[100] border ${theme === 'dark'
+                                        ? 'bg-[#1E1E1E] border-white/5 backdrop-blur-3xl'
+                                        : 'bg-white border-gray-100 shadow-2xl'}`}>
+
+                                        <div className="flex flex-col py-1">
+                                            {/* Primary Action: File Upload */}
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    fileInputRef.current?.click();
+                                                    setShowUploadMenu(false);
+                                                }}
+                                                className={`w-full flex items-center space-x-3.5 px-4 py-3.5 rounded-2xl transition-all ${theme === 'dark' ? 'hover:bg-white/5 text-[#E3E3E3]' : 'hover:bg-gray-50 text-slate-700'}`}
+                                            >
+                                                <Paperclip size={20} className={theme === 'dark' ? 'text-[#C4C7C5]' : 'text-gray-500'} />
+                                                <span className="text-[15px] font-medium font-sans">Add photos & files</span>
+                                            </button>
+
+                                            <div className={`h-[1px] my-1 mx-2 ${theme === 'dark' ? 'bg-white/5' : 'bg-gray-100'}`}></div>
+
+                                            {/* AI Tools */}
+                                            {[
+                                                { icon: <Image size={20} />, label: 'Create image' },
+                                                { icon: <Lightbulb size={20} />, label: 'Thinking' },
+                                                { icon: <Telescope size={20} />, label: 'Deep research' },
+                                                { icon: <ShoppingBag size={20} />, label: 'Shopping research' }
+                                            ].map((item, idx) => (
+                                                <button
+                                                    key={idx}
+                                                    type="button"
+                                                    className={`w-full flex items-center space-x-3.5 px-4 py-2.5 rounded-2xl transition-all ${theme === 'dark' ? 'hover:bg-white/5 text-[#E3E3E3]' : 'hover:bg-gray-50 text-slate-700'}`}
+                                                >
+                                                    <span className={theme === 'dark' ? 'text-[#C4C7C5]' : 'text-gray-500'}>{item.icon}</span>
+                                                    <span className="text-[15px] font-medium font-sans">{item.label}</span>
+                                                </button>
+                                            ))}
+
+                                            <div className={`h-[1px] my-1 mx-2 ${theme === 'dark' ? 'bg-white/5' : 'bg-gray-100'}`}></div>
+
+                                            {/* Footer Actions */}
+                                            <div className="relative group/more">
+                                                <button
+                                                    type="button"
+                                                    className={`w-full flex items-center justify-between px-4 py-2.5 rounded-2xl transition-all ${theme === 'dark' ? 'hover:bg-white/5 text-[#E3E3E3]' : 'hover:bg-gray-50 text-slate-700'}`}
+                                                >
+                                                    <div className="flex items-center space-x-3.5">
+                                                        <MoreVertical size={20} className={theme === 'dark' ? 'text-[#C4C7C5]' : 'text-gray-400'} />
+                                                        <span className="text-[15px] font-medium font-sans">More</span>
+                                                    </div>
+                                                    <ChevronRight size={18} className={theme === 'dark' ? 'text-[#C4C7C5]' : 'text-gray-400'} />
+                                                </button>
+
+                                                {/* More Submenu (Language) */}
+                                                <div className={`absolute left-full bottom-0 ml-4 invisible group-hover/more:visible opacity-0 group-hover/more:opacity-100 transition-all duration-300 rounded-[20px] p-2 min-w-[180px] shadow-2xl border ${theme === 'dark' ? 'bg-[#1E1E1E] border-white/5 backdrop-blur-3xl' : 'bg-white border-gray-200'}`}>
+                                                    <div className="px-3 py-1.5 mb-1">
+                                                        <p className={`text-[10px] font-bold uppercase tracking-wider text-gray-500`}>Voice Language</p>
+                                                    </div>
+                                                    {['English', 'Hindi', 'Marathi'].map(lang => (
+                                                        <button
+                                                            key={lang}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setLanguage(lang);
+                                                                setShowUploadMenu(false);
+                                                            }}
+                                                            className={`w-full text-left px-3 py-2 text-sm rounded-xl transition-all ${language === lang ? (theme === 'dark' ? 'bg-white/10 text-white' : 'bg-blue-100 text-blue-600') : (theme === 'dark' ? 'text-[#C4C7C5] hover:bg-white/5' : 'text-slate-700 hover:bg-gray-100')}`}
+                                                        >
+                                                            {lang}
+                                                        </button>
+                                                    ))}
+                                                </div>
                                             </div>
-                                        </button>
-                                    ))}
-                                </div>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
-                            {/* Attachment Button */}
-                            <button
-                                type="button"
-                                onClick={() => fileInputRef.current?.click()}
-                                className={`p-3 rounded-xl transition-all flex items-center border ${theme === 'dark' ? 'bg-[#1B1730] border-purple-500/10 text-purple-400 hover:text-purple-300 hover:border-purple-500/30' : 'bg-gray-50 border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-200'}`}
-                                title="Attach Prescription"
-                            >
-                                <Paperclip size={20} />
-                            </button>
-
-                            {/* Speech-to-Text Button */}
+                            {/* Speech-to-Text Button (Keep separate for accessibility if needed, or integrate) */}
                             <button
                                 type="button"
                                 onClick={isListening ? stopSpeechToText : startSpeechToText}

@@ -19,7 +19,7 @@ const OrderDetails = () => {
     const fetchDetails = async () => {
       try {
         const { data } = await orderAPI.getOrderDetails(orderId);
-        setOrder(data);
+        setOrder(data.order);
       } catch (error) {
         console.error("Failed to fetch order details:", error);
       } finally {
@@ -71,6 +71,8 @@ const OrderDetails = () => {
     (order.status.toUpperCase() === 'PLACED' && step.id === 'PENDING') ||
     (order.status.toUpperCase() === 'CONFIRMED' && step.id === 'PROCESSING') ||
     (order.status.toUpperCase() === 'IN_WAREHOUSE' && step.id === 'PROCESSING') ||
+    (order.status.toUpperCase() === 'OUT_FOR_DELIVERY' && step.id === 'SHIPPED') ||
+    (order.status.toUpperCase() === 'SHIPPED' && step.id === 'SHIPPED') ||
     (order.status.toUpperCase() === 'FULFILLED' && step.id === 'DELIVERED')
   );
 
@@ -199,7 +201,7 @@ const OrderDetails = () => {
                 </div>
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-widest opacity-40 dark:opacity-60 mb-1 text-black dark:text-white">Shipping Address</p>
-                  <p className="text-sm font-bold leading-relaxed text-black dark:text-white/90">
+                  <div className="text-sm font-bold leading-relaxed text-black dark:text-white/90">
                     {order.userId && order.userId.address1 ? (
                       <div className="space-y-1.5 grayscale-0 group-hover:grayscale-0 transition-all">
                         <div className="font-black text-[10px] uppercase tracking-[0.1em] text-brand-primary">
@@ -221,7 +223,7 @@ const OrderDetails = () => {
                     ) : (
                       'No address provided'
                     )}
-                  </p>
+                  </div>
                 </div>
               </div>
               <div className="flex items-start space-x-4">
@@ -229,9 +231,9 @@ const OrderDetails = () => {
                   <Clock size={18} />
                 </div>
                 <div>
-                  <p className="text-[10px] font-black uppercase tracking-widest opacity-40 dark:opacity-60 mb-1 text-black dark:text-white">Expected Delivery</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest opacity-40 dark:opacity-60 mb-1 text-black dark:text-white">Refill Due (Predicted)</p>
                   <p className="text-sm font-bold leading-relaxed text-black dark:text-white/90">
-                    {order.estimatedEndDate ? new Date(order.estimatedEndDate).toLocaleDateString() : 'Processing soon'}
+                    {order.estimatedEndDate ? new Date(order.estimatedEndDate).toLocaleDateString() : 'Analyzing course...'}
                   </p>
                 </div>
               </div>

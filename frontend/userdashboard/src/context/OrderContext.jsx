@@ -19,7 +19,8 @@ export const OrderProvider = ({ children }) => {
     setLoading(true);
     try {
       const { data } = await orderAPI.getHistory(user.id);
-      const formattedOrders = data.map(order => ({
+      const history = data.orders || data.history || [];
+      const formattedOrders = history.map(order => ({
         id: order._id.substring(order._id.length - 6),
         fullId: order._id,
         name: order.items.map(i => i.medicineId?.name || "Medicine").join(", "),
@@ -55,8 +56,9 @@ export const OrderProvider = ({ children }) => {
     if (!user?.id) return;
     try {
       const { data } = await cartAPI.get();
-      if (data && data.items) {
-        const mappedCart = data.items.map(item => ({
+      const cartData = data.cart;
+      if (cartData && cartData.items) {
+        const mappedCart = cartData.items.map(item => ({
           id: item.medicineId._id,
           dbId: item._id,
           name: item.medicineId.name,
@@ -68,6 +70,8 @@ export const OrderProvider = ({ children }) => {
           image: '💊' // In future, use item.medicineId.image
         }));
         setCart(mappedCart);
+      } else {
+        setCart([]);
       }
     } catch (error) {
       console.error("Failed to fetch cart:", error);
@@ -79,7 +83,7 @@ export const OrderProvider = ({ children }) => {
     if (!user?.id) return;
     try {
       const { data } = await notificationAPI.getUserNotifications(user.id);
-      setNotifications(data);
+      setNotifications(data.notifications || []);
     } catch (error) {
       console.warn("Failed to fetch notifications:", error);
     }
@@ -113,6 +117,7 @@ export const OrderProvider = ({ children }) => {
       // Poll for new notifications every 10 seconds to keep UI "Real-time"
       interval = setInterval(() => {
         fetchNotifications();
+        fetchOrders(); // Keep order status in sync
       }, 10000);
     } else {
       setOrders([]);
@@ -130,7 +135,7 @@ export const OrderProvider = ({ children }) => {
   });
 
   useEffect(() => {
-    const active = orders.filter(o => ['CONFIRMED', 'OUT_FOR_DELIVERY', 'PENDING'].includes(o.status.toUpperCase())).length;
+    const active = orders.filter(o => ['CONFIRMED', 'OUT_FOR_DELIVERY', 'PENDING', 'PROCESSING', 'IN_WAREHOUSE', 'SHIPPED'].includes(o.status.toUpperCase())).length;
     setStats(prev => ({
       ...prev,
       activeOrders: active,
@@ -171,7 +176,7 @@ export const OrderProvider = ({ children }) => {
       });
       fetchCart();
     } catch (error) {
-      const msg = error.response?.data?.error || "Failed to add to cart";
+      const msg = error.response?.data?.message || error.response?.data?.error || "Failed to add to cart";
       alert(msg);
       console.error("Add to cart error:", error);
     }
@@ -200,7 +205,7 @@ export const OrderProvider = ({ children }) => {
       });
       fetchCart();
     } catch (error) {
-      const msg = error.response?.data?.error || "Failed to update quantity";
+      const msg = error.response?.data?.message || error.response?.data?.error || "Failed to update quantity";
       alert(msg);
       console.error("Update qty error:", error);
     }

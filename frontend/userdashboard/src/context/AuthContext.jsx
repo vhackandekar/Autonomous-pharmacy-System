@@ -10,10 +10,15 @@ export const AuthProvider = ({ children }) => {
     // Check for saved user and token on initial load
     const savedUser = localStorage.getItem('auth-user');
     const token = localStorage.getItem('token');
-    
+
     if (savedUser && token) {
       try {
-        setUser(JSON.parse(savedUser));
+        const parsedUser = JSON.parse(savedUser);
+        // Ensure id compatibility for both _id and id (self-healing)
+        if (parsedUser && parsedUser._id && !parsedUser.id) {
+          parsedUser.id = parsedUser._id;
+        }
+        setUser(parsedUser);
       } catch (error) {
         console.error("Failed to parse saved user:", error);
         localStorage.removeItem('auth-user');
@@ -24,9 +29,23 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const login = (userData, token) => {
-    setUser(userData);
-    localStorage.setItem('auth-user', JSON.stringify(userData));
-    localStorage.setItem('token', token);
+    // Ensure id compatibility for both _id and id (self-healing)
+    const patchedUser = { ...userData };
+    if (patchedUser && patchedUser._id && !patchedUser.id) {
+      patchedUser.id = patchedUser._id;
+    }
+    setUser(patchedUser);
+    localStorage.setItem('auth-user', JSON.stringify(patchedUser));
+    if (token) localStorage.setItem('token', token);
+  };
+
+  const updateUser = (updates) => {
+    setUser(prev => {
+      const newUser = { ...prev, ...updates };
+      if (newUser._id && !newUser.id) newUser.id = newUser._id;
+      localStorage.setItem('auth-user', JSON.stringify(newUser));
+      return newUser;
+    });
   };
 
   const logout = () => {
@@ -38,7 +57,7 @@ export const AuthProvider = ({ children }) => {
   const isAuthenticated = !!user;
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated, loading, login, updateUser, logout }}>
       {children}
     </AuthContext.Provider>
   );

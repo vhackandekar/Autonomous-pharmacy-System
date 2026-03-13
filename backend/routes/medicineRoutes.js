@@ -6,6 +6,5 @@ const { verifyToken, verifyAdmin } = require('../middleware/auth');
 router.get('/', medicineController.getAllMedicines);
 router.post('/add', verifyToken, verifyAdmin, medicineController.addMedicine);
 router.put('/update/:id', verifyToken, verifyAdmin, medicineController.updateMedicine);
-router.post('/subscribe-stock', verifyToken, medicineController.subscribeToStock);
 
 module.exports = router;

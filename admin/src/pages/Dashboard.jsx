@@ -83,9 +83,14 @@ export default function Dashboard() {
         getMedicines(),
       ]);
 
-      setStats(statsRes.data);
-      const allOrders = ordersRes.data || [];
-      const medicines = medicinesRes.data || [];
+      if (statsRes.data.success) {
+        setStats(statsRes.data.stats);
+      } else {
+        setStats(statsRes.data);
+      }
+
+      const allOrders = ordersRes.data.success ? (ordersRes.data.orders || ordersRes.data.history) : (Array.isArray(ordersRes.data) ? ordersRes.data : []);
+      const medicines = medicinesRes.data.success ? medicinesRes.data.medicines : (Array.isArray(medicinesRes.data) ? medicinesRes.data : []);
       setLowStockMedicines(medicines.filter(m => m.stock < 20));
 
       const weeklyMap = {};

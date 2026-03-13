@@ -28,22 +28,28 @@ class SafetyAgent {
         }
 
         for (const item of items) {
-            const medName = item.medicine_name || "";
-            if (!medName || medName.toLowerCase() === 'undefined') continue;
+            // Robust normalization of medicine name
+            const rawName = item?.medicine_name || item?.name || "";
+            const medName = String(rawName).trim();
+
+            if (!medName || medName.toLowerCase() === 'undefined' || medName === "") {
+                console.warn("[SafetyAgent] Skipping item with invalid name:", item);
+                continue;
+            }
 
             const escapedName = medName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             // 1. Try Fuzzy Match (Contains Name or Alternate Names)
             let medicine = await Medicine.findOne({
                 $or: [
                     { name: { $regex: new RegExp(escapedName, 'i') } },
-                    { alternateNames: { $in: [new RegExp(escapedName, 'i')] } }
+                    { alternateNames: { $elemMatch: { $regex: new RegExp(`^${escapedName}$`, 'i') } } }
                 ]
             });
 
             if (!medicine) {
                 isApproved = false;
-                reasons.push(`Medicine ${item.medicine_name} not found in database.`);
-                results.push({ medicine_name: item.medicine_name, status: 'REJECTED', reason: 'NOT_FOUND' });
+                reasons.push(`Medicine "${medName}" not found in our clinical database.`);
+                results.push({ medicine_name: medName, status: 'REJECTED', reason: 'NOT_FOUND' });
                 continue;
             }
 

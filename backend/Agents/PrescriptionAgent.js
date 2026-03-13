@@ -96,7 +96,9 @@ class PrescriptionAgent {
             "detectedMedicines": ["Name1", "Name2"],
             "dosage": "string",
             "doctorName": "string",
-            "issuedDate": "YYYY-MM-DD"
+            "patientName": "string",
+            "issuedDate": "YYYY-MM-DD",
+            "clinicalFindings": "Any symptoms or diagnosis mentioned"
         }`;
 
         try {

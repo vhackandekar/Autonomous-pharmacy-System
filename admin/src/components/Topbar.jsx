@@ -77,7 +77,8 @@ export default function Topbar() {
         const allNotifs = [];
 
         // 1. Add Real DB Notifications
-        (notifsRes.data || []).forEach(notif => {
+        const notificationsData = notifsRes.data.notifications || (Array.isArray(notifsRes.data) ? notifsRes.data : []);
+        notificationsData.forEach(notif => {
           allNotifs.push({
             id: notif._id,
             type: notif.type,

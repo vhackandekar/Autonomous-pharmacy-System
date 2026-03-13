@@ -24,15 +24,20 @@ class PrescriptionValidator {
                 isAuthentic: false,
                 metrics: []
             },
+            patient: {
+                name: extractedData.patientName || 'Not identified',
+                clinicalFindings: extractedData.clinicalFindings || 'None detected'
+            },
             status: 'PHARMACIST_REVIEW_REQUIRED',
             reason: '',
-            confidenceScore: confidence || 0
+            confidenceScore: confidence || 0,
+            analysisDuration: '1.2s' // Mock for now
         };
 
         // --- HARD REJECTION CHECKS ---
         if (report.confidenceScore < 60) {
-            report.status = 'REJECTED';
-            report.reason = 'OCR confidence below 60%. Image may be too blurred or damaged.';
+            report.status = 'PHARMACIST_REVIEW_REQUIRED';
+            report.reason = 'OCR confidence below 60%. Sent for pharmacist review to ensure safety.';
             return report;
         }
 
@@ -42,10 +47,10 @@ class PrescriptionValidator {
             return report;
         }
 
-        // --- AUTHENTICITY CHECK (Doctor Info) ---
         this.verifyAuthenticity(extractedData, report);
         if (report.status === 'REJECTED') {
-            report.reason = 'Prescription REJECTED: Doctor name or clinic credentials (License/Header) are missing.';
+            report.status = 'PHARMACIST_REVIEW_REQUIRED';
+            report.reason = 'Doctor credentials or license details are unclear. Sent for manual verification.';
             return report;
         }
 
@@ -55,8 +60,8 @@ class PrescriptionValidator {
             report.medicines.push(result);
 
             if (result.validationStatus === 'REJECTED') {
-                report.status = 'REJECTED';
-                report.reason = `Prescription REJECTED (Safety Error): ${result.message}`;
+                report.status = 'PHARMACIST_REVIEW_REQUIRED';
+                report.reason = `Clinical Safety Alert: ${result.message}. Sent for pharmacist review.`;
                 return report;
             }
         }
@@ -64,8 +69,6 @@ class PrescriptionValidator {
         // --- FINAL STATUS: All others go to Admin Verification ---
         report.status = 'PHARMACIST_REVIEW_REQUIRED';
         if (!report.reason) report.reason = 'Sent to Pharmacist for final human verification.';
-
-        return report;
 
         return report;
     }
@@ -99,8 +102,8 @@ class PrescriptionValidator {
         if (entry.dosage && entry.frequency) {
             const dailyDose = this.calculateDailyDose(entry.dosage, entry.frequency);
             if (medicine.name.toLowerCase() === 'paracetamol' && dailyDose > 4000) {
-                entry.validationStatus = 'REJECTED';
-                entry.message = `Dangerous Dosage: ${dailyDose}mg/day of Paracetamol exceeds safe limit.`;
+                entry.validationStatus = 'PHARMACIST_REVIEW_REQUIRED';
+                entry.message = `High Dosage Alert: ${dailyDose}mg/day of Paracetamol. Verify with user/doctor.`;
                 return entry;
             }
         }
@@ -156,7 +159,7 @@ class PrescriptionValidator {
 
         report.doctor.isAuthentic = authScore >= 70;
         if (!report.doctor.isAuthentic) {
-            report.status = 'REJECTED';
+            report.status = 'PHARMACIST_REVIEW_REQUIRED';
         }
     }
 

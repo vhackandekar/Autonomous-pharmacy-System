@@ -1,6 +1,5 @@
 fastapi
 uvicorn
-python-multipart
 opencv-python
 numpy
 easyocr
@@ -9,4 +8,4 @@ torch
 torchvision
 torchaudio
 pillow
-scipy
+python-multipart

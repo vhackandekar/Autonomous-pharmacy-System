@@ -14,7 +14,11 @@ const userSchema = new mongoose.Schema({
     theme: { type: String, enum: ['light', 'dark'], default: 'light' },
     language: { type: String, default: 'English' },
     voiceMode: { type: Boolean, default: false },
+    refillAlerts: { type: Boolean, default: true },
+    orderUpdates: { type: Boolean, default: true },
     isVerified: { type: Boolean, default: true },
+    resetPasswordToken: { type: String },
+    resetPasswordExpires: { type: Date },
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);

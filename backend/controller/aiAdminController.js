@@ -5,6 +5,8 @@ const Vendor = require('../schema/Vendor');
 const PurchaseOrder = require('../schema/PurchaseOrder');
 const mongoose = require('mongoose');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const ErrorHandler = require('../utils/ErrorHandler');
+const asyncHandler = require('../utils/asyncHandler');
 
 // Helper to format currency
 const formatCurrency = (val) => `₹${Number(val).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
@@ -12,80 +14,71 @@ const formatCurrency = (val) => `₹${Number(val).toLocaleString('en-IN', { maxi
 // Initialize Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-exports.processAIChat = async (req, res) => {
-    try {
-        const { message } = req.body;
-        const query = message.toLowerCase();
+exports.processAIChat = asyncHandler(async (req, res, next) => {
+    const { message } = req.body;
+    if (!message) return next(new ErrorHandler('Message is required', 400));
+    const query = message.toLowerCase();
 
-        // 1. Check for hardcoded structured triggers first for speed and reliability
-        if (query.includes('monthly report')) return res.json(await generateMonthlyReport());
-        if (query.includes('yearly report')) return res.json(await generateYearlyReport());
-        if (query.includes('recent orders')) return res.json(await getRecentOrders());
-        if (query.includes('profit analysis')) return res.json(await generateProfitAnalysis());
-        if (query.includes('low stock')) return res.json(await getLowStock());
-        if (query.includes('top selling medicines') || query.includes('top selling medicine')) return res.json(await getTopSellingMedicines(true));
-        if (query.includes('monthly revenue trend') || query.includes('revenue trend')) return res.json(await getMonthlyRevenueTrend());
-        if (query.includes('order status distribution') || query.includes('order status')) return res.json(await getOrderStatusDistribution());
-        if (query.includes('yearly growth')) return res.json(await getYearlyGrowth());
-        if (query.includes('profit comparison')) return res.json(await getProfitComparison());
-        if (query.includes('order low stock medicines') || query.includes('restock')) return res.json(await handleAIRestockDraft());
+    // 1. Check for hardcoded structured triggers
+    if (query.includes('monthly report')) return res.json({ success: true, data: await generateMonthlyReport() });
+    if (query.includes('yearly report')) return res.json({ success: true, data: await generateYearlyReport() });
+    if (query.includes('recent orders')) return res.json({ success: true, data: await getRecentOrders() });
+    if (query.includes('profit analysis')) return res.json({ success: true, data: await generateProfitAnalysis() });
+    if (query.includes('low stock')) return res.json({ success: true, data: await getLowStock() });
+    if (query.includes('top selling medicines') || query.includes('top selling medicine')) return res.json({ success: true, data: await getTopSellingMedicines(true) });
+    if (query.includes('monthly revenue trend') || query.includes('revenue trend')) return res.json({ success: true, data: await getMonthlyRevenueTrend() });
+    if (query.includes('order status distribution') || query.includes('order status')) return res.json({ success: true, data: await getOrderStatusDistribution() });
+    if (query.includes('yearly growth')) return res.json({ success: true, data: await getYearlyGrowth() });
+    if (query.includes('profit comparison')) return res.json({ success: true, data: await getProfitComparison() });
+    if (query.includes('order low stock medicines') || query.includes('restock')) return res.json({ success: true, data: await handleAIRestockDraft() });
 
-        if (query.includes('audit todays performance') || query.includes('audit today')) {
-            const rep = await generateMonthlyReport();
-            rep.content = "## Today's Performance Audit\n" + rep.content;
-            return res.json(rep);
-        }
+    if (query.includes('audit todays performance') || query.includes('audit today')) {
+        const rep = await generateMonthlyReport();
+        rep.content = "## Today's Performance Audit\n" + rep.content;
+        return res.json({ success: true, data: rep });
+    }
 
-        // 2. Intelligence: Handle natural language updates (innovation!)
-        if (query.includes('update') && (query.includes('cost') || query.includes('price'))) {
-            return res.json(await handleAIUpdate(message));
-        }
+    // 2. Intelligence: Handle natural language updates
+    if (query.includes('update') && (query.includes('cost') || query.includes('price'))) {
+        return res.json({ success: true, data: await handleAIUpdate(message) });
+    }
 
+    // 3. Natural Language Intelligence with Gemini
+    const systemContext = await getSystemContext();
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
+    const prompt = `
+        You are "AI Chat", the Pharmacy Admin Intelligence system for an Autonomous Pharmacy.
+        You have access to the following real-time system data:
+        ${JSON.stringify(systemContext, null, 2)}
 
-        // 2. If not a direct trigger, use Gemini for intelligent response
-        const systemContext = await getSystemContext();
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        Guidelines:
+        - Use Markdown for formatting (headers, bullets).
+        - Always think like a business consultant/admin assistant.
+        - If the user asks for things you can't do, explain your capabilities.
+        - Your current capabilities include: Monthly/Yearly reports, Profit analysis, Low stock alerts, Revenue trends, and Top selling medicines.
+        - UNIQUE FEATURE: You can now update cost prices! Example: "Update the cost price of paracetamol to 45".
+        - Keep responses professional and data-driven.
 
-        const prompt = `
-            You are "AI Chat", the Pharmacy Admin Intelligence system for an Autonomous Pharmacy.
-            You have access to the following real-time system data:
-            ${JSON.stringify(systemContext, null, 2)}
+        User Message: "${message}"
+        
+        Response:
+    `;
 
-            Guidelines:
-            - Use Markdown for formatting (headers, bullets).
-            - Always think like a business consultant/admin assistant.
-            - If the user asks for things you can't do, explain your capabilities.
-            - Your current capabilities include: Monthly/Yearly reports, Profit analysis (MTD/YTD), Low stock alerts, Revenue trends, and Top selling medicines.
-            - UNIQUE FEATURE: You can now update cost prices! Example: "Update the cost price of paracetamol to 45" or "Change Dolo cost to 12".
-            - Keep responses professional and data-driven.
+    const result = await model.generateContent(prompt);
+    let aiResponse = result.response.text();
 
-            User Message: "${message}"
-            
-            Response:
-        `;
-
-        const result = await model.generateContent(prompt);
-        let aiResponse = result.response.text();
-
-        // Extra check: if the AI *thinks* it updated something but didn't trigger handleAIUpdate
-        if (aiResponse.toLowerCase().includes('successfully updated') && !query.includes('update')) {
-            // Just safety check
-        }
-
-        res.json({
+    res.json({
+        success: true,
+        data: {
             role: 'agent',
             content: aiResponse,
             type: 'text',
             data: null,
             time: new Date()
-        });
-
-    } catch (error) {
-        console.error('AI Chat Error:', error);
-        res.status(500).json({ error: 'Failed to process AI request' });
-    }
-};
+        }
+    });
+});
 
 async function getSystemContext() {
     try {
@@ -613,55 +606,3 @@ async function getProfitComparison() {
     };
 }
 
-async function getPredictiveRestock() {
-    const medicines = await Medicine.find();
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-    const orders = await Order.find({ orderDate: { $gte: thirtyDaysAgo } });
-
-    const predictions = [];
-
-    medicines.forEach(med => {
-        let totalSoldLast30Days = 0;
-        orders.forEach(o => {
-            const item = o.items.find(i => i.medicineId?.toString() === med._id.toString());
-            if (item) totalSoldLast30Days += item.quantity;
-        });
-
-        const velocity = totalSoldLast30Days / 30; // units per day
-        if (velocity > 0) {
-            const daysRemaining = Math.floor(med.stock / velocity);
-            if (daysRemaining <= 14) { // Only show items running out in next 2 weeks
-                predictions.push({
-                    name: med.name,
-                    stock: med.stock,
-                    velocity: velocity.toFixed(2),
-                    daysLeft: daysRemaining
-                });
-            }
-        }
-    });
-
-    predictions.sort((a, b) => a.daysLeft - b.daysLeft);
-
-    const chartLabels = predictions.map(p => p.name);
-    const chartData = predictions.map(p => p.daysLeft);
-
-    return {
-        role: 'agent',
-        type: 'chart',
-        data: {
-            chartTitle: "Stock Depletion Forecast (Days Remaining)",
-            chartType: "Bar Chart",
-            labels: chartLabels,
-            datasets: [{
-                label: "Days Until Stock-out",
-                data: chartData
-            }],
-            insights: predictions.length > 0
-                ? `Forecast indicates ${predictions.length} items will deplete within two weeks. Action: Authorize restock orders for items with less than 7 days remaining (${predictions.filter(p => p.daysLeft < 7).map(p => p.name).join(', ') || 'None'}) immediately.`
-                : "Inventory velocity analysis suggests no critical stock-outs within the next 14 days. Sales velocity is currently matched by inventory levels."
-        }
-    };
-}

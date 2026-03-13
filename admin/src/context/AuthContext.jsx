@@ -27,13 +27,24 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
+  const updateUser = useCallback((u, t) => {
+    if (u) {
+      localStorage.setItem('user', JSON.stringify(u));
+      setUser(u);
+    }
+    if (t) {
+      localStorage.setItem('token', t);
+      setToken(t);
+    }
+  }, []);
+
   // Initialize auth on mount
   useEffect(() => {
     setIsInitializing(false);
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, isAuthenticated: !!token, isInitializing }}>
+    <AuthContext.Provider value={{ user, token, login, logout, updateUser, isAuthenticated: !!token, isInitializing }}>
       {children}
     </AuthContext.Provider>
   );

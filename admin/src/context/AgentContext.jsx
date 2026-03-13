@@ -68,9 +68,9 @@ export function AgentProvider({ children }) {
         getVendors().catch(() => ({ data: null })),
       ]);
 
-      const meds = medsRes?.data?.length ? medsRes.data : MOCK_MEDS;
-      const ords = ordersRes?.data?.length ? ordersRes.data : MOCK_ORDERS;
-      const vends = vendorsRes?.data?.length ? vendorsRes.data : MOCK_VENDORS;
+      const meds = medsRes?.data?.success ? medsRes.data.medicines : MOCK_MEDS;
+      const ords = ordersRes?.data?.success ? ordersRes.data.history || ordersRes.data.orders : MOCK_ORDERS;
+      const vends = vendorsRes?.data?.success ? vendorsRes.data.vendors : MOCK_VENDORS;
 
       setMedicines(meds);
       setOrders(ords);

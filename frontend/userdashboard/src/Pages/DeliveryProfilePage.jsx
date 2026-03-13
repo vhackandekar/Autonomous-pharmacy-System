@@ -11,7 +11,7 @@ import { Button, Badge } from '../Component/UI';
 
 const DeliveryProfilePage = () => {
   const { theme } = useTheme();
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const [form, setForm] = useState({
     name: '',
     phone: '',
@@ -27,15 +27,16 @@ const DeliveryProfilePage = () => {
     const fetchProfile = async () => {
       try {
         const { data } = await authAPI.getProfile();
+        const userData = data.user || data;
         setForm(prev => ({
           ...prev,
-          name: data.name || '',
-          phone: data.phone || '',
-          address1: data.address1 || '',
-          address2: data.address2 || '',
-          city: data.city || '',
-          state: data.state || '',
-          pin: data.pin || ''
+          name: userData.name || '',
+          phone: userData.phone || '',
+          address1: userData.address1 || '',
+          address2: userData.address2 || '',
+          city: userData.city || '',
+          state: userData.state || '',
+          pin: userData.pin || ''
         }));
       } catch (error) {
         console.error("Failed to fetch profile:", error);
@@ -87,9 +88,12 @@ const DeliveryProfilePage = () => {
   const handleSave = async () => {
     if (!validateForm()) return;
     try {
-      await authAPI.updateProfile({
+      const { data } = await authAPI.updateProfile({
         ...form
       });
+      // Ensure local context stays synced too
+      const userData = data.user || data;
+      updateUser(userData);
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (error) {

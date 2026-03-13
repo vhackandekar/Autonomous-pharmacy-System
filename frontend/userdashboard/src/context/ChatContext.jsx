@@ -147,13 +147,23 @@ export const ChatProvider = ({ children }) => {
   };
 
   const uploadFile = async (file, text = "") => {
+    // Generate local preview for immediate UI update
+    const previewUrl = URL.createObjectURL(file);
+    const attachment = {
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      preview: previewUrl
+    };
+
     const formData = new FormData();
     formData.append('prescription', file);
 
     const userMsg = {
       id: Date.now(),
       role: 'user',
-      content: text || `[Uploaded Image: ${file.name}]`,
+      content: text || "",
+      attachment: attachment,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 

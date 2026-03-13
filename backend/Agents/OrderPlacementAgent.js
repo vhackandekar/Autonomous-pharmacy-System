@@ -5,6 +5,7 @@ const User = require('../schema/User');
 const Notification = require('../schema/Notification');
 const Prescription = require('../schema/Prescription');
 const axios = require('axios');
+const { checkLowStockAndNotify } = require('../utils/inventoryUtility');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const Groq = require("groq-sdk");
 
@@ -43,8 +44,10 @@ class OrderPlacementAgent {
 
                 // --- RESERVE STOCK IMMEDIATELY ---
                 medicine.stock -= (item.quantity || 1);
-                medicine.lowStockNotified = false; // Reset so they get notified again if it dips
                 await medicine.save();
+
+                // Check for low stock and notify admin
+                await checkLowStockAndNotify(medicine, global.io);
 
                 // Log Inventory Change
                 await new InventoryLog({
@@ -167,18 +170,30 @@ class OrderPlacementAgent {
                 }).catch(err => console.error("n8n Trigger Failed:", err.message));
             }
 
-            // Create notification in DB
-            const notif = await new Notification({
-                userId,
-                type: 'order',
-                message: `Your order for ${itemsWithPrices.map(i => i.medicineName).join(', ')} has been confirmed! Order ID: ${savedOrder._id}`
-            }).save();
+            // Create notification in DB only if user wants order updates
+            const userPref = await User.findById(userId);
+            if (userPref && userPref.orderUpdates !== false) {
+                const notif = await new Notification({
+                    userId,
+                    type: 'order',
+                    message: `Your order for ${itemsWithPrices.map(i => i.medicineName).join(', ')} has been confirmed! Order ID: ${savedOrder._id}`
+                }).save();
 
-            // --- REAL-TIME NOTIFICATION ---
+                // --- REAL-TIME NOTIFICATION TO USER ---
+                if (global.io) {
+                    global.io.to(String(userId)).emit('notification', notif);
+                }
+            }
+
+            // --- REAL-TIME NOTIFICATION TO ADMIN (Always ON) ---
             if (global.io) {
-                // To User
-                global.io.to(String(userId)).emit('notification', notif);
-                // To Admin (About new order)
+                const adminNotif = await new Notification({
+                    recipientRole: 'ADMIN',
+                    type: 'order',
+                    message: `New AI Order! User ${user?.name || 'Customer'} placed an order via Agent.`
+                }).save();
+
+                global.io.to('admin').emit('notification', adminNotif);
                 global.io.to('admin').emit('order_created', savedOrder);
             }
 
@@ -300,14 +315,16 @@ class OrderPlacementAgent {
             const PredictiveRefillAgent = require('./PredictiveRefillAgent');
             await PredictiveRefillAgent.analyzeAndAlert(order.userId, trace, sessionId);
 
-            // For User
-            await new Notification({
-                userId: order.userId,
-                type: 'order',
-                message: `Your order for ${medicineNames} has been confirmed! Predicted end date: ${estimatedEndDate.toDateString()}.`
-            }).save();
+            // For User (Respect Preference)
+            if (user && user.orderUpdates !== false) {
+                await new Notification({
+                    userId: order.userId,
+                    type: 'order',
+                    message: `Your order for ${medicineNames} has been confirmed! Predicted end date: ${estimatedEndDate.toDateString()}.`
+                }).save();
+            }
 
-            // For Admin
+            // For Admin (Always ON)
             await new Notification({
                 recipientRole: 'ADMIN',
                 type: 'order',

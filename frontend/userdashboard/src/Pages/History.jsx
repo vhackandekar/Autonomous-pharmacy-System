@@ -40,9 +40,9 @@ const HistoryPage = () => {
 
   const filteredOrders = orders.filter(order => {
     const status = order.status.toUpperCase();
-    // History includes Fulfilled, Cancelled, and Rejected
-    const isHistory = ['FULFILLED', 'CANCELLED', 'REJECTED', 'DELIVERED'].includes(status);
-    if (!isHistory) return false;
+    // History includes past orders. Active orders are in MyOrders, 
+    // but the user expects History to show everything or at least delivered/cancelled.
+    // Let's make History show EVERYTHING but default filter to show relevant history.
 
     // Status Filter
     const matchesFilter =
@@ -56,6 +56,7 @@ const HistoryPage = () => {
     const searchLower = searchTerm.toLowerCase();
     return (
       order.id.toLowerCase().includes(searchLower) ||
+      order.fullId.toLowerCase().includes(searchLower) ||
       order.name.toLowerCase().includes(searchLower)
     );
   });
@@ -92,8 +93,8 @@ const HistoryPage = () => {
               key={opt.id}
               onClick={() => setFilter(opt.id)}
               className={`flex-1 lg:flex-none flex items-center justify-center space-x-2 px-6 py-2.5 rounded-[1.25rem] text-[11px] font-black uppercase tracking-widest transition-all ${filter === opt.id
-                  ? 'bg-white dark:bg-white/10 shadow-lg text-brand-primary dark:text-white'
-                  : 'text-black dark:text-white opacity-40 hover:opacity-100 hover:bg-black/5 dark:hover:bg-white/5'
+                ? 'bg-white dark:bg-white/10 shadow-lg text-brand-primary dark:text-white'
+                : 'text-black dark:text-white opacity-40 hover:opacity-100 hover:bg-black/5 dark:hover:bg-white/5'
                 }`}
             >
               {opt.icon}

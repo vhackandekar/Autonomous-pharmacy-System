@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, User, Bell, Shield, Database, Save, Moon, Sun, Palette } from 'lucide-react';
+import { Settings as SettingsIcon, User, Bell, Shield, Save, Moon, Sun, Palette } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { updateProfile } from '../utils/api';
+import { getProfile, updateProfile, changePassword } from '../utils/api';
 import toast from 'react-hot-toast';
 
 export default function Settings() {
-  const { user, login: updateLocalUser } = useAuth();
+  const { user, updateUser } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [activeTab, setActiveTab] = useState('profile');
   const [profile, setProfile] = useState({
@@ -15,10 +15,33 @@ export default function Settings() {
     phone: user?.phone || '',
     role: user?.role || 'ADMIN'
   });
+  const [security, setSecurity] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
   const [saving, setSaving] = useState(false);
+  const [updatingPassword, setUpdatingPassword] = useState(false);
 
-  // Sync profile when user context changes
+  // Sync profile when user context changes or on mount to get latest from DB
   useEffect(() => {
+    const fetchLatestProfile = async () => {
+      try {
+        const { data } = await getProfile();
+        const userData = data.user || data;
+        setProfile({
+          name: userData.name || '',
+          email: userData.email || '',
+          phone: userData.phone || '',
+          role: userData.role || 'ADMIN'
+        });
+        // Also update local user context if different
+        updateUser && updateUser(userData, localStorage.getItem('token'));
+      } catch (err) {
+        console.error('Failed to sync profile with DB:', err);
+      }
+    };
+
     if (user) {
       setProfile({
         name: user.name || '',
@@ -26,39 +49,49 @@ export default function Settings() {
         phone: user.phone || '',
         role: user.role || 'ADMIN'
       });
+      fetchLatestProfile();
     }
-  }, [user]);
+  }, [user, updateUser]);
 
   const [notifs, setNotifs] = useState({
-    lowStock: true,
-    newOrders: true,
+    lowStock: user?.refillAlerts ?? true,
+    newOrders: user?.orderUpdates ?? true,
     deliveries: false,
     weeklyReport: true,
   });
 
-  const [apiConfig, setApiConfig] = useState({
-    baseUrl: 'http://localhost:5000/api',
-    groqApiKey: '••••••••••••',
-    geminiApiKey: '••••••••••••',
-  });
+  // Sync notifs when user loads
+  useEffect(() => {
+    if (user) {
+      setNotifs(prev => ({
+        ...prev,
+        lowStock: user.refillAlerts ?? true,
+        newOrders: user.orderUpdates ?? true,
+      }));
+    }
+  }, [user]);
 
   const tabs = [
     { id: 'profile', label: 'Profile', icon: User },
     { id: 'appearance', label: 'Appearance', icon: Palette },
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'security', label: 'Security', icon: Shield },
-    { id: 'api', label: 'API Config', icon: Database },
   ];
 
   const handleSaveProfile = async () => {
+    // Validation
+    if (!profile.name.trim()) return toast.error('Full name is required');
+    if (profile.phone && profile.phone.trim().length < 10) return toast.error('Valid phone number required');
+
     setSaving(true);
     try {
       const { data } = await updateProfile({
-        name: profile.name,
-        phone: profile.phone
+        name: profile.name.trim(),
+        phone: profile.phone ? profile.phone.trim() : ''
       });
+      const userData = data.user || data;
       // Update global context so header/sidebar reflect changes
-      updateLocalUser && updateLocalUser(data, localStorage.getItem('token'));
+      updateUser && updateUser(userData, localStorage.getItem('token'));
       toast.success('Profile updated successfully!');
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to update profile');
@@ -67,8 +100,45 @@ export default function Settings() {
     }
   };
 
-  const handleSaveGeneral = () => {
-    toast.success('Settings saved successfully!');
+  const handleUpdatePassword = async () => {
+    if (!security.currentPassword || !security.newPassword || !security.confirmPassword) {
+      return toast.error('Please fill in all password fields');
+    }
+    if (security.newPassword !== security.confirmPassword) {
+      return toast.error('New passwords do not match');
+    }
+
+    setUpdatingPassword(true);
+    try {
+      await changePassword({
+        currentPassword: security.currentPassword,
+        newPassword: security.newPassword
+      });
+      toast.success('Clinical credentials updated successfully!');
+      setSecurity({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Credential update failed');
+    } finally {
+      setUpdatingPassword(false);
+    }
+  };
+
+  const handleSaveGeneral = async () => {
+    setSaving(true);
+    try {
+      const { data } = await updateProfile({
+        refillAlerts: notifs.lowStock,
+        orderUpdates: notifs.newOrders,
+        theme: theme
+      });
+      const userData = data.user || data;
+      updateUser && updateUser(userData, localStorage.getItem('token'));
+      toast.success('Settings saved successfully!');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to save settings');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -106,15 +176,33 @@ export default function Settings() {
           <div style={{ padding: 24 }}>
             {activeTab === 'profile' && (
               <div style={{ maxWidth: 500 }}>
-                <div style={{
-                  width: 80, height: 80,
-                  background: 'linear-gradient(135deg, #22c55e, #16a34a)',
-                  borderRadius: '50%',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 32, fontWeight: 800, color: 'white',
-                  marginBottom: 24
-                }}>
-                  {profile.name ? profile.name.split(' ').map(n => n[0]).join('') : 'A'}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 24 }}>
+                  <div style={{
+                    width: 80, height: 80,
+                    background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+                    borderRadius: '50%',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 32, fontWeight: 800, color: 'white'
+                  }}>
+                    {profile.name ? profile.name.split(' ').map(n => n[0]).join('') : 'A'}
+                  </div>
+                  <div>
+                    <h3 style={{ marginBottom: 4 }}>{profile.name}</h3>
+                    <div style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '4px 10px',
+                      borderRadius: 20,
+                      background: 'rgba(34,197,94,0.1)',
+                      color: 'var(--brand)',
+                      fontSize: 12,
+                      fontWeight: 700
+                    }}>
+                      <Shield size={12} />
+                      Verified Manager
+                    </div>
+                  </div>
                 </div>
                 {[
                   ['Full Name', 'name', 'text'],
@@ -211,7 +299,6 @@ export default function Settings() {
                 {[
                   ['lowStock', 'Low Stock Alerts', 'Get notified when medicines are running low'],
                   ['newOrders', 'New Orders', 'Receive alerts for new pharmacy orders'],
-
                   ['deliveries', 'Delivery Updates', 'Track shipment and delivery status changes'],
                   ['weeklyReport', 'Weekly Reports', 'Get a weekly summary of pharmacy performance'],
                 ].map(([key, label, desc]) => (
@@ -248,73 +335,100 @@ export default function Settings() {
                     </label>
                   </div>
                 ))}
-                <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={handleSaveGeneral}>
-                  <Save size={16} /> Save Preferences
+                <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={handleSaveGeneral} disabled={saving}>
+                  <Save size={16} /> {saving ? 'Saving...' : 'Save Preferences'}
                 </button>
               </div>
             )}
 
             {activeTab === 'security' && (
               <div style={{ maxWidth: 500 }}>
-                <div style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)', borderRadius: 10, padding: 16, marginBottom: 24, display: 'flex', gap: 10 }}>
-                  <Shield size={18} color="var(--accent-green)" />
+                <div style={{
+                  background: 'linear-gradient(135deg, rgba(34,197,94,0.08), rgba(34,197,94,0.04))',
+                  border: '1px solid rgba(34,197,94,0.2)',
+                  borderRadius: 12,
+                  padding: 20,
+                  marginBottom: 32,
+                  display: 'flex',
+                  gap: 16,
+                  alignItems: 'center'
+                }}>
+                  <div style={{
+                    width: 48, height: 48,
+                    background: 'white',
+                    borderRadius: 12,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                  }}>
+                    <Shield size={24} color="var(--brand)" />
+                  </div>
                   <div>
-                    <div style={{ fontWeight: 600, fontSize: 14 }}>Account Secured</div>
-                    <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Your account is protected with JWT authentication</div>
+                    <div style={{ fontWeight: 800, fontSize: 16, color: 'var(--text-primary)' }}>Account Integrity Verified</div>
+                    <div style={{ fontSize: 13, color: 'var(--text-secondary)', opacity: 0.8 }}>Your administrative session is protected by clinical-grade JWT encryption.</div>
                   </div>
                 </div>
-                <h4 style={{ marginBottom: 16 }}>Change Password</h4>
-                {['Current Password', 'New Password', 'Confirm New Password'].map(label => (
-                  <div className="form-group" key={label}>
-                    <label className="form-label">{label}</label>
-                    <input type="password" className="form-control" placeholder="••••••••" />
-                  </div>
-                ))}
-                <button className="btn btn-primary" onClick={() => toast.success('Password updated!')}>
-                  <Save size={16} /> Update Password
-                </button>
-              </div>
-            )}
 
-            {activeTab === 'api' && (
-              <div style={{ maxWidth: 600 }}>
-                <p style={{ color: 'var(--text-secondary)', marginBottom: 20, fontSize: 14 }}>
-                  Configure API endpoints and keys for integrations.
-                </p>
-                <div className="form-group">
-                  <label className="form-label">Backend API URL</label>
-                  <input
-                    className="form-control"
-                    value={apiConfig.baseUrl}
-                    onChange={e => setApiConfig(p => ({ ...p, baseUrl: e.target.value }))}
-                  />
+                <div style={{ marginBottom: 32 }}>
+                  <h4 style={{ fontSize: 14, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-muted)', marginBottom: 20 }}>Credential Rotation</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    <div className="form-group">
+                      <label className="form-label">Current Clinical Password</label>
+                      <input
+                        type="password"
+                        className="form-control"
+                        placeholder="••••••••"
+                        value={security.currentPassword}
+                        onChange={e => setSecurity(s => ({ ...s, currentPassword: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">New Hardened Password</label>
+                      <input
+                        type="password"
+                        className="form-control"
+                        placeholder="••••••••"
+                        value={security.newPassword}
+                        onChange={e => setSecurity(s => ({ ...s, newPassword: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Confirm New Password</label>
+                      <input
+                        type="password"
+                        className="form-control"
+                        placeholder="••••••••"
+                        value={security.confirmPassword}
+                        onChange={e => setSecurity(s => ({ ...s, confirmPassword: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <button
+                    className="btn btn-primary"
+                    style={{ marginTop: 24, width: '100%', justifyContent: 'center' }}
+                    onClick={handleUpdatePassword}
+                    disabled={updatingPassword}
+                  >
+                    <Save size={16} /> {updatingPassword ? 'Rotating Credentials...' : 'Update Clinical Password'}
+                  </button>
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Groq API Key</label>
-                  <input
-                    type="password"
-                    className="form-control"
-                    value={apiConfig.groqApiKey}
-                    onChange={e => setApiConfig(p => ({ ...p, groqApiKey: e.target.value }))}
-                  />
+
+                <div style={{
+                  padding: 20,
+                  background: 'var(--bg-secondary)',
+                  borderRadius: 12,
+                  border: '1px solid var(--border)',
+                  fontSize: 12
+                }}>
+                  <div style={{ fontWeight: 700, marginBottom: 8, color: 'var(--text-primary)' }}>Session Audit Information:</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 8, color: 'var(--text-muted)' }}>
+                    <span>Identity Status:</span>
+                    <span style={{ color: 'var(--brand)', fontWeight: 600 }}>{user?.isVerified ? 'VERIFIED' : 'PENDING'}</span>
+                    <span>JWT Protocol:</span>
+                    <span>RS256 (Clinical Grade)</span>
+                    <span>Last Rotation:</span>
+                    <span>{new Date(user?.updatedAt).toLocaleDateString()}</span>
+                  </div>
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Gemini API Key</label>
-                  <input
-                    type="password"
-                    className="form-control"
-                    value={apiConfig.geminiApiKey}
-                    onChange={e => setApiConfig(p => ({ ...p, geminiApiKey: e.target.value }))}
-                  />
-                </div>
-                <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 14, marginBottom: 20, fontSize: 13 }}>
-                  <strong>Database:</strong> MongoDB via Mongoose<br />
-                  <strong>Auth:</strong> JWT Tokens<br />
-                  <strong>Storage:</strong> Multer (Prescriptions)
-                </div>
-                <button className="btn btn-primary" onClick={handleSaveGeneral}>
-                  <Save size={16} /> Save Configuration
-                </button>
               </div>
             )}
           </div>

@@ -17,7 +17,7 @@ export const ThemeProvider = ({ children }) => {
       if (user.language) setLanguage(user.language);
       if (user.voiceMode !== undefined) setVoiceMode(user.voiceMode);
     }
-  }, [user]);
+  }, [user?.id]);
 
   useEffect(() => {
     localStorage.setItem('app-theme', theme);

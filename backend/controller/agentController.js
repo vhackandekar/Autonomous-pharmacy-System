@@ -14,37 +14,41 @@ const Notification = require('../schema/Notification');
 const langfuse = require('../utils/langfuseClient');
 const fs = require('fs');
 const { uploadToCloudinary } = require('../utils/cloudinary');
+const ErrorHandler = require('../utils/ErrorHandler');
+const asyncHandler = require('../utils/asyncHandler');
 
 // Configuration from environment
 const CONFIDENCE_THRESHOLD = parseFloat(process.env.PRESCRIPTION_CONFIDENCE_THRESHOLD || 0.75);
 const MAX_PRESCRIPTION_AGE_MONTHS = parseInt(process.env.PRESCRIPTION_MAX_AGE_MONTHS || 6);
 
-exports.chatUpload = async (req, res) => {
+exports.chatUpload = asyncHandler(async (req, res, next) => {
     const userId = req.user.id;
     const file = req.file;
 
     if (!file) {
-        console.error("Chat Upload: No file in request");
-        return res.status(400).json({ error: "No file uploaded" });
+        return next(new ErrorHandler("No file uploaded", 400));
     }
 
     console.log(`Chat Upload: File received: ${file.originalname}, Path: ${file.path}`);
 
-    const langfuse = require('../utils/langfuseClient');
     const trace = langfuse ? langfuse.trace({
         name: "Prescription-Upload-Flow",
         userId: userId.toString(),
         metadata: { filename: file.originalname }
     }) : null;
 
+    // Helper for file cleanup
+    const cleanup = () => {
+        if (file?.path) fs.unlink(file.path, () => { });
+    };
+
     try {
-        // Get cart and candidate medicines (also Check Order Confirmation intent)
+        // Get cart and candidate medicines
         const cart = await Cart.findOne({ userId, status: 'PENDING' }).populate('items.medicineId');
         const pendingOrder = await OrderConfirmation.findOne({ userId, status: 'WAITING' }).sort({ createdAt: -1 }).populate('pendingOrderData.items.medicineId');
 
         let medicinesRequiringPresc = cart ? cart.items.filter(i => i.medicineId && i.medicineId.prescriptionRequired).map(i => i.medicineId) : [];
 
-        // Add medicines from pending order staging
         if (pendingOrder && pendingOrder.pendingOrderData && pendingOrder.pendingOrderData.items) {
             const orderMeds = pendingOrder.pendingOrderData.items
                 .filter(i => i.medicineId && i.medicineId.prescriptionRequired)
@@ -52,28 +56,24 @@ exports.chatUpload = async (req, res) => {
             medicinesRequiringPresc = [...new Set([...medicinesRequiringPresc, ...orderMeds])];
         }
 
-        // --- NEW: Contextual History Recovery ---
-        // If uploader has no active candidates, check for recent prescription-related rejections in history
+        // Contextual History Recovery
         if (medicinesRequiringPresc.length === 0) {
             const recentRejections = await AgentLog.find({
                 userId,
                 workflowStatus: { $in: ['REJECTED_BY_SAFETY', 'PROCESSED', 'COMPLETED_CONVERSATION'] },
-                timestamp: { $gt: new Date(Date.now() - 10 * 60 * 1000) } // Last 10 minutes (extended)
-            }).sort({ timestamp: -1 }).limit(3); // Check last 3 interactions
+                timestamp: { $gt: new Date(Date.now() - 10 * 60 * 1000) }
+            }).sort({ timestamp: -1 }).limit(3);
 
             const allPrescMeds = await Medicine.find({ prescriptionRequired: true });
 
             outerLoop: for (const log of recentRejections) {
                 const combinedText = `${log.userMessage} ${log.agentResponse}`.toLowerCase();
-
-                // If the interaction mentions "prescription", "doctor", "upload", or "valid"
                 if (/prescription|upload|doctor|valid|required/i.test(combinedText)) {
                     for (const med of allPrescMeds) {
                         const medName = med.name.toLowerCase();
                         if (combinedText.includes(medName)) {
                             medicinesRequiringPresc.push(med);
-                            console.log(`Context Recovery: Identified ${med.name} from recent interaction: "${log.userMessage}"`);
-                            break outerLoop; // Found a candidate
+                            break outerLoop;
                         }
                     }
                 }
@@ -83,48 +83,34 @@ exports.chatUpload = async (req, res) => {
         let candidates = medicinesRequiringPresc;
 
         if (candidates.length === 0) {
-            // Clean up file
-            if (file && file.path) {
-                fs.unlink(file.path, (err) => { if (err) console.error('File cleanup error:', err); });
-            }
+            cleanup();
             if (trace) trace.update({ output: "No candidates found" });
             return res.json({
-                agentResponse: {
-                    answer: "I couldn't identify which medicine you're uploading this prescription for. Please add the medicine to your cart first, or say 'Order [medicine name]' so I know what to check!",
-                    intent: 'UPLOAD_PRESCRIPTION'
+                success: true,
+                data: {
+                    agentResponse: {
+                        answer: "I couldn't identify which medicine you're uploading this prescription for. Please add the medicine to your cart first, or say 'Order [medicine name]' so I know what to check!",
+                        intent: 'UPLOAD_PRESCRIPTION'
+                    }
                 }
             });
         }
 
         // Perform OCR Analysis
-        let analysis;
-        try {
-            const analysisSpan = trace ? trace.span({ name: "Perform-OCR-Analysis" }) : null;
-            analysis = await PrescriptionAgent.analyzePrescription(file.path, userId, analysisSpan);
-            console.log('OCR Complete:', { status: analysis.status, count: analysis.detectedMedicines.length });
-            if (analysisSpan) analysisSpan.end({ output: analysis });
-        } catch (ocrErr) {
-            console.error("OCR Failed:", ocrErr);
-            if (file && file.path) fs.unlink(file.path, () => { });
-            if (trace) trace.update({ output: ocrErr.message, level: "ERROR" });
-            return res.status(500).json({ error: "OCR Analysis failed" });
-        }
+        const analysisSpan = trace ? trace.span({ name: "Perform-OCR-Analysis" }) : null;
+        const analysis = await PrescriptionAgent.analyzePrescription(file.path, userId, analysisSpan);
+        if (analysisSpan) analysisSpan.end({ output: analysis });
 
         const decisionSpan = trace ? trace.span({ name: "Medicine-Matching-Decision", input: { detected: analysis.detectedMedicines } }) : null;
 
-        // Find the specific target medicine (prioritizing user cart/intent)
         let targetMedicine = null;
         if (analysis.detectedMedicines && analysis.detectedMedicines.length > 0) {
-            // Check if any detected medicine is in the user's current intent/candidates (Case Insensitive)
             const match = candidates.find(c =>
                 analysis.detectedMedicines.some(det => det.toLowerCase() === c.name.toLowerCase())
             );
-            if (match) {
-                targetMedicine = match;
-            }
+            if (match) targetMedicine = match;
         }
 
-        // Fallback: If OCR didn't detect a specific medicine, check if it matches our candidates via fuzzy or partial matches
         if (!targetMedicine && analysis.detectedMedicines && analysis.detectedMedicines.length > 0) {
             for (const cand of candidates) {
                 const candName = cand.name.toLowerCase();
@@ -137,62 +123,71 @@ exports.chatUpload = async (req, res) => {
 
         if (decisionSpan) decisionSpan.end({ output: { matched: targetMedicine?.name || 'none' } });
 
-        // PROTECTIVE CHECK: If the OCR found a medicine but it's NOT our target candidate
         if (!targetMedicine && analysis.detectedMedicines && analysis.detectedMedicines.length > 0) {
             const detectedMeds = analysis.detectedMedicines.join(', ');
-            if (file && file.path) fs.unlink(file.path, () => { });
+            cleanup();
             return res.json({
-                agentResponse: {
-                    answer: `I detected **${detectedMeds}** on this document, but not the **${candidates.map(c => c.name).join(' or ')}** you're trying to order. Please upload the correct prescription.`,
-                    intent: 'FALLBACK'
+                success: true,
+                data: {
+                    agentResponse: {
+                        answer: `I detected **${detectedMeds}** on this document, but not the **${candidates.map(c => c.name).join(' or ')}** you're trying to order. Please upload the correct prescription.`,
+                        intent: 'FALLBACK'
+                    }
                 }
             });
         }
 
         if (!targetMedicine) {
-            if (file && file.path) fs.unlink(file.path, () => { });
+            cleanup();
             if (trace) trace.update({ output: "No target medicine matched" });
             return res.json({
-                agentResponse: {
-                    answer: "I couldn't identify a matching medicine in our system from this prescription. Could you please specify which medicine this is for?",
-                    intent: 'FALLBACK'
+                success: true,
+                data: {
+                    agentResponse: {
+                        answer: "I couldn't identify a matching medicine in our system from this prescription. Could you please specify which medicine this is for?",
+                        intent: 'FALLBACK'
+                    }
                 }
             });
         }
 
-        // Logic Guards
         if (!targetMedicine.prescriptionRequired) {
-            if (file && file.path) fs.unlink(file.path, () => { });
+            cleanup();
             const responseText = `Actually, ${targetMedicine.name} doesn't require a prescription! You can buy it directly.`;
             if (trace) trace.update({ output: responseText, metadata: { status: 'OTC_REDIRECT' } });
             return res.json({
-                agentResponse: {
-                    answer: responseText,
-                    intent: 'ADD_TO_CART',
-                    items: [{ medicine_name: targetMedicine.name, quantity: 1 }]
+                success: true,
+                data: {
+                    agentResponse: {
+                        answer: responseText,
+                        intent: 'ADD_TO_CART',
+                        items: [{ medicine_name: targetMedicine.name, quantity: 1 }]
+                    }
                 }
             });
         }
 
         if (targetMedicine.stock <= 0) {
-            if (file && file.path) fs.unlink(file.path, () => { });
+            cleanup();
             const responseText = `I've found ${targetMedicine.name} on the prescription, but it's currently out of stock.`;
             if (trace) trace.update({ output: responseText, metadata: { status: 'OUT_OF_STOCK' } });
             return res.json({
-                agentResponse: {
-                    answer: responseText,
-                    intent: 'FALLBACK'
+                success: true,
+                data: {
+                    agentResponse: {
+                        answer: responseText,
+                        intent: 'FALLBACK'
+                    }
                 }
             });
         }
 
-        // CRITICAL: Validate that the prescription actually mentions the target medicine
         const medicineValidation = await PrescriptionAgent.validateMedicineInPrescription(
             targetMedicine._id,
             analysis.detectedMedicines
         );
 
-        // --- CLOUDINARY UPLOAD ---
+        // CLOUDINARY UPLOAD
         let finalImageUrl = `/uploads/${file.filename}`;
         let cloudinaryPublicId = null;
         try {
@@ -203,7 +198,6 @@ exports.chatUpload = async (req, res) => {
             }
         } catch (cloudErr) {
             console.error("Cloudinary Upload (Agent) Failed:", cloudErr);
-            // Fallback to local if Cloudinary fails but file still exists (uploadToCloudinary usually deletes it)
         }
 
         const presc = new Prescription({
@@ -230,7 +224,6 @@ exports.chatUpload = async (req, res) => {
 
         await presc.save();
 
-        // Generate final context-aware response
         const confScore = (analysis.confidence / 100).toFixed(2);
         let responseText = `I've processed the document. Status: ${analysis.status} (Score: ${confScore})`;
 
@@ -246,95 +239,79 @@ exports.chatUpload = async (req, res) => {
             responseText = `🛑 **Status: REJECTED (HIGH RISK)**\nReason: My safety engine detected dangerous interactions or dosages. Manual review is mandatory.`;
         }
 
-        // Notify via socket with error handling
-        try {
-            if (global.io) {
-                global.io.to(String(userId)).emit('prescription_updated', presc);
-                global.io.to(String(userId)).emit('notification', {
-                    type: 'prescription',
-                    message: responseText
-                });
-            }
-        } catch (socketErr) {
-            console.error("Socket.io notification error:", socketErr);
-            // Notification saved to DB as fallback
+        if (global.io) {
+            global.io.to(String(userId)).emit('prescription_updated', presc);
+            global.io.to(String(userId)).emit('notification', {
+                type: 'prescription',
+                message: responseText
+            });
         }
 
-        // Log the event
-        try {
-            await new AgentLog({
-                userId,
-                agentName: 'ConversationalAgent',
-                userMessage: `[File Upload: ${file.originalname}]`,
-                agentResponse: responseText,
-                intent: 'UPLOAD_PRESCRIPTION',
-                workflowStatus: analysis.status || 'PENDING'
-            }).save();
-        } catch (logErr) {
-            console.error("Error logging agent action:", logErr);
-            // Not critical, continue
-        }
+        await new AgentLog({
+            userId,
+            agentName: 'ConversationalAgent',
+            userMessage: `[File Upload: ${file.originalname}]`,
+            agentResponse: responseText,
+            intent: 'UPLOAD_PRESCRIPTION',
+            workflowStatus: analysis.status || 'PENDING'
+        }).save();
 
         if (trace) trace.update({ output: responseText });
 
         res.json({
-            agentResponse: {
-                answer: responseText,
-                intent: 'UPLOAD_PRESCRIPTION',
-                thought_process: "User uploaded a file. Performed clinical analysis using PrescriptionAgent."
-            },
-            prescription: presc
+            success: true,
+            data: {
+                agentResponse: {
+                    answer: responseText,
+                    intent: 'UPLOAD_PRESCRIPTION',
+                    thought_process: "User uploaded a file. Performed clinical analysis using PrescriptionAgent."
+                },
+                prescription: presc
+            }
         });
 
     } catch (error) {
-        console.error("Chat Upload Error:", error);
-        // Clean up file on error
-        if (file && file.path && fs.existsSync(file.path)) {
-            fs.unlink(file.path, (err) => { if (err) console.error('File cleanup error:', err); });
-        }
+        cleanup();
         if (trace) trace.update({ output: error.message, level: "ERROR" });
-        res.status(500).json({
-            error: "Failed to process prescription",
-            message: error.message || "An unexpected error occurred"
-        });
+        return next(error);
     }
-};
+});
 
-exports.chat = async (req, res) => {
+exports.chat = asyncHandler(async (req, res, next) => {
     const { userMessage: originalMessage, userHistory: chatHistory, sessionId, language = 'English' } = req.body;
     const userId = req.user.id;
 
     if (!originalMessage) {
-        return res.status(400).json({ error: "userMessage is required" });
+        return next(new ErrorHandler("userMessage is required", 400));
     }
 
     let trace = null;
+    const user = await User.findById(userId);
+    if (!user) return next(new ErrorHandler("User not found", 404));
+
+    // Default language from user profile if not provided in request
+    const userLang = language || user.language || 'English';
+    let userMessage = originalMessage;
+
+    const informationalIntents = ['VIEW_CART', 'GENERAL_QUERY', 'SYMPTOM_QUERY', 'HISTORY_QUERY', 'FALLBACK'];
+
+    // --- STEP 0: Translation (Indic to English) ---
+    if (userLang.toLowerCase() !== 'english') {
+        console.log(`Translating user message from ${userLang} to English...`);
+        userMessage = await ConversationalAgent.translateMessage(originalMessage, 'English', userLang);
+        console.log(`Translated Message: ${userMessage}`);
+    }
+
+    const orderHistory = await Order.find({ userId })
+        .sort({ orderDate: -1 })
+        .limit(5)
+        .populate('items.medicineId', 'name');
+
+    const userCart = await Cart.findOne({ userId, status: 'PENDING' })
+        .populate('items.medicineId', 'name');
+
+
     try {
-        const user = await User.findById(userId);
-        if (!user) return res.status(404).json({ error: "User not found" });
-
-        // Default language from user profile if not provided in request
-        const userLang = language || user.language || 'English';
-        let userMessage = originalMessage;
-
-        const informationalIntents = ['VIEW_CART', 'GENERAL_QUERY', 'SYMPTOM_QUERY', 'HISTORY_QUERY', 'FALLBACK'];
-
-        // --- STEP 0: Translation (Indic to English) ---
-        if (userLang.toLowerCase() !== 'english') {
-            console.log(`Translating user message from ${userLang} to English...`);
-            userMessage = await ConversationalAgent.translateMessage(originalMessage, 'English', userLang);
-            console.log(`Translated Message: ${userMessage}`);
-        }
-
-        const orderHistory = await Order.find({ userId })
-            .sort({ orderDate: -1 })
-            .limit(5)
-            .populate('items.medicineId', 'name');
-
-        const userCart = await Cart.findOne({ userId, status: 'PENDING' })
-            .populate('items.medicineId', 'name');
-
-
         // --- LANGFUSE TRACE START ---
         trace = langfuse ? langfuse.trace({
             name: "Agent-Decision-Flow",
@@ -396,7 +373,13 @@ exports.chat = async (req, res) => {
         if (informationalIntents.includes(agentResult.intent)) {
             if (logicSpan) logicSpan.end({ output: "INFORMATIONAL_QUERY_COMPLETED" });
             if (langfuse) await langfuse.flushAsync();
-            return res.json({ agentResponse: agentResult, workflowStatus: 'COMPLETED_CONVERSATION' });
+            return res.json({
+                success: true,
+                data: {
+                    agentResponse: agentResult,
+                    workflowStatus: 'COMPLETED_CONVERSATION'
+                }
+            });
         }
 
         // B. FINALIZING ORDER (CONFIRM_ORDER or ORDER_PAYMENT)
@@ -423,7 +406,13 @@ exports.chat = async (req, res) => {
                 } else {
                     if (logicSpan) logicSpan.end({ output: "NO_PENDING_ORDER_FOUND" });
                     if (langfuse) await langfuse.flushAsync();
-                    return res.json({ agentResponse: agentResult, workflowStatus: 'NO_PENDING_ORDER' });
+                    return res.json({
+                        success: true,
+                        data: {
+                            agentResponse: agentResult,
+                            workflowStatus: 'NO_PENDING_ORDER'
+                        }
+                    });
                 }
             } else {
                 finalItems = pendingConf.pendingOrderData.items;
@@ -449,10 +438,15 @@ exports.chat = async (req, res) => {
             // NEW: Final Safety Validation before placement
             const safetyItems = processedItems.map(i => ({ medicine_name: i.medicine_name, quantity: i.quantity }));
             const safetyResult = await SafetyAgent.validateOrder(userId, safetyItems, trace, sessionId);
-
             if (!safetyResult.isApproved) {
                 agentResult.answer = `I can't finalize this order yet. ${safetyResult.reasons.join(' ')}`;
-                return res.json({ agentResponse: agentResult, workflowStatus: 'REJECTED_BY_SAFETY' });
+                return res.json({
+                    success: true,
+                    data: {
+                        agentResponse: agentResult,
+                        workflowStatus: 'REJECTED_BY_SAFETY'
+                    }
+                });
             }
 
             const missingDosageItems = processedItems.filter(item =>
@@ -466,7 +460,13 @@ exports.chat = async (req, res) => {
 
                 if (logicSpan) logicSpan.end({ output: "AWAITING_DOSAGE_DURING_CONFIRMATION" });
                 if (langfuse) await langfuse.flushAsync();
-                return res.json({ agentResponse: agentResult, workflowStatus: 'AWAITING_DOSAGE' });
+                return res.json({
+                    success: true,
+                    data: {
+                        agentResponse: agentResult,
+                        workflowStatus: 'AWAITING_DOSAGE'
+                    }
+                });
             }
 
             const result = await OrderPlacementAgent.processOrder(
@@ -479,7 +479,13 @@ exports.chat = async (req, res) => {
 
             if (!result.success) {
                 agentResult.answer = `I ran into an issue while placing your order: ${result.error}`;
-                return res.json({ agentResponse: agentResult, workflowStatus: 'PLACEMENT_FAILED' });
+                return res.json({
+                    success: true,
+                    data: {
+                        agentResponse: agentResult,
+                        workflowStatus: 'PLACEMENT_FAILED'
+                    }
+                });
             }
 
             if (pendingConf) {
@@ -491,7 +497,14 @@ exports.chat = async (req, res) => {
 
             if (logicSpan) logicSpan.end({ output: "ORDER_PLACED_SUCCESSFULLY" });
             if (langfuse) await langfuse.flushAsync();
-            return res.json({ agentResponse: agentResult, order: result.order, workflowStatus: 'ORDER_PLACED' });
+            return res.json({
+                success: true,
+                data: {
+                    agentResponse: agentResult,
+                    order: result.order,
+                    workflowStatus: 'ORDER_PLACED'
+                }
+            });
         }
 
         // C. CART REMOVAL
@@ -514,7 +527,13 @@ exports.chat = async (req, res) => {
 
             if (logicSpan) logicSpan.end({ output: "REMOVE_FROM_CART_COMPLETED" });
             if (langfuse) await langfuse.flushAsync();
-            return res.json({ agentResponse: agentResult, workflowStatus: 'REMOVED_FROM_CART' });
+            return res.json({
+                success: true,
+                data: {
+                    agentResponse: agentResult,
+                    workflowStatus: 'REMOVED_FROM_CART'
+                }
+            });
         }
 
         // D. CANCEL ORDER
@@ -539,7 +558,13 @@ exports.chat = async (req, res) => {
 
             if (logicSpan) logicSpan.end({ output: "ORDER_CANCELLED" });
             if (langfuse) await langfuse.flushAsync();
-            return res.json({ agentResponse: agentResult, workflowStatus: 'ORDER_CANCELLED' });
+            return res.json({
+                success: true,
+                data: {
+                    agentResponse: agentResult,
+                    workflowStatus: 'ORDER_CANCELLED'
+                }
+            });
         }
 
         // E. REFILL (Suggestion of previous order)
@@ -548,7 +573,13 @@ exports.chat = async (req, res) => {
             if (!lastOrder) {
                 agentResult.answer = "I couldn't find any previous orders to refill. What would you like to order today?";
                 if (langfuse) await langfuse.flushAsync();
-                return res.json({ agentResponse: agentResult, workflowStatus: 'NO_HISTORY' });
+                return res.json({
+                    success: true,
+                    data: {
+                        agentResponse: agentResult,
+                        workflowStatus: 'NO_HISTORY'
+                    }
+                });
             }
 
             // Map last order to confirmation
@@ -563,8 +594,13 @@ exports.chat = async (req, res) => {
             const safetyResult = await SafetyAgent.validateOrder(userId, refillItems, trace, sessionId);
             if (!safetyResult.isApproved) {
                 agentResult.answer = `I'd love to refill that for you, but I encountered a safety issue: ${safetyResult.reasons.join(' ')}`;
-                if (langfuse) await langfuse.flushAsync();
-                return res.json({ agentResponse: agentResult, workflowStatus: 'REJECTED_BY_SAFETY' });
+                return res.json({
+                    success: true,
+                    data: {
+                        agentResponse: agentResult,
+                        workflowStatus: 'REJECTED_BY_SAFETY'
+                    }
+                });
             }
 
             await OrderConfirmation.deleteMany({ userId, status: 'WAITING' });
@@ -587,7 +623,13 @@ exports.chat = async (req, res) => {
 
             if (logicSpan) logicSpan.end({ output: "REFILL_AWAITING_CONFIRMATION" });
             if (langfuse) await langfuse.flushAsync();
-            return res.json({ agentResponse: agentResult, workflowStatus: 'AWAITING_CONFIRMATION' });
+            return res.json({
+                success: true,
+                data: {
+                    agentResponse: agentResult,
+                    workflowStatus: 'AWAITING_CONFIRMATION'
+                }
+            });
         }
 
         // F. ACTIONABLE NEW REQUESTS (ORDER_MEDICINE or ADD_TO_CART)
@@ -637,8 +679,11 @@ exports.chat = async (req, res) => {
 
                     if (trace) trace.update({ output: "OUT_OF_STOCK_PERMISSION_REQUESTED" });
                     return res.json({
-                        agentResponse: agentResult,
-                        workflowStatus: 'OUT_OF_STOCK_QUERY'
+                        success: true,
+                        data: {
+                            agentResponse: agentResult,
+                            workflowStatus: 'OUT_OF_STOCK_QUERY'
+                        }
                     });
                 }
 
@@ -655,8 +700,11 @@ exports.chat = async (req, res) => {
                 }).save();
 
                 return res.json({
-                    agentResponse: { ...agentResult, answer: safetyMessage },
-                    workflowStatus: 'REJECTED_BY_SAFETY'
+                    success: true,
+                    data: {
+                        agentResponse: { ...agentResult, answer: safetyMessage },
+                        workflowStatus: 'REJECTED_BY_SAFETY'
+                    }
                 });
             }
 
@@ -666,8 +714,11 @@ exports.chat = async (req, res) => {
                 if (logicSpan) logicSpan.end({ output: "AWAITING_DOSAGE_SELECTION" });
                 if (langfuse) await langfuse.flushAsync();
                 return res.json({
-                    agentResponse: agentResult,
-                    workflowStatus: 'AWAITING_DOSAGE'
+                    success: true,
+                    data: {
+                        agentResponse: agentResult,
+                        workflowStatus: 'AWAITING_DOSAGE'
+                    }
                 });
             }
 
@@ -687,7 +738,13 @@ exports.chat = async (req, res) => {
                 await cart.save();
                 if (logicSpan) logicSpan.end({ output: "ADDED_TO_CART" });
                 if (langfuse) await langfuse.flushAsync();
-                return res.json({ agentResponse: agentResult, workflowStatus: 'ADDED_TO_CART' });
+                return res.json({
+                    success: true,
+                    data: {
+                        agentResponse: agentResult,
+                        workflowStatus: 'ADDED_TO_CART'
+                    }
+                });
             }
 
             // ORDER_MEDICINE Confirmation (Staging Phase)
@@ -730,8 +787,11 @@ exports.chat = async (req, res) => {
                 if (logicSpan) logicSpan.end({ output: "AWAITING_DOSAGE_DURING_STAGING" });
                 if (langfuse) await langfuse.flushAsync();
                 return res.json({
-                    agentResponse: agentResult,
-                    workflowStatus: 'AWAITING_DOSAGE'
+                    success: true,
+                    data: {
+                        agentResponse: agentResult,
+                        workflowStatus: 'AWAITING_DOSAGE'
+                    }
                 });
             }
 
@@ -743,7 +803,13 @@ exports.chat = async (req, res) => {
 
             if (logicSpan) logicSpan.end({ output: "AWAITING_CONFIRMATION" });
             if (langfuse) await langfuse.flushAsync();
-            return res.json({ agentResponse: agentResult, workflowStatus: 'AWAITING_CONFIRMATION' });
+            return res.json({
+                success: true,
+                data: {
+                    agentResponse: agentResult,
+                    workflowStatus: 'AWAITING_CONFIRMATION'
+                }
+            });
         }
 
         // G. STOCK NOTIFICATION SUBSCRIPTION
@@ -774,12 +840,24 @@ exports.chat = async (req, res) => {
                 if (!historyContainsMed) {
                     console.warn(`[NOTIFY_SECURITY] Blocked hallucination: AI tried to notify for [${medicineName}] but it wasn't in history or user message.`);
                     agentResult.answer = "I'm sorry, I might have gotten confused. Which medicine would you like me to notify you about?";
-                    return res.json({ agentResponse: agentResult, workflowStatus: 'HALLUCINATION_BLOCKED' });
+                    return res.json({
+                        success: true,
+                        data: {
+                            agentResponse: agentResult,
+                            workflowStatus: 'HALLUCINATION_BLOCKED'
+                        }
+                    });
                 }
             } else if (!containsMention && !isAffirmative && userMessage.length > 3) {
                 console.warn(`[NOTIFY_SECURITY] Blocked suspected cross-talk: AI tried to notify for [${medicineName}] but user said [${userMessage}]`);
                 agentResult.answer = `I'm sorry, I don't have enough information to set up a notification for that brand. Did you mean something else?`;
-                return res.json({ agentResponse: agentResult, workflowStatus: 'HALLUCINATION_BLOCKED' });
+                return res.json({
+                    success: true,
+                    data: {
+                        agentResponse: agentResult,
+                        workflowStatus: 'HALLUCINATION_BLOCKED'
+                    }
+                });
             }
 
             const StockAlert = require("../schema/StockAlert");
@@ -800,7 +878,13 @@ exports.chat = async (req, res) => {
 
             if (logicSpan) logicSpan.end({ output: "NOTIFY_STOCK_COMPLETED" });
             if (langfuse) await langfuse.flushAsync();
-            return res.json({ agentResponse: agentResult, workflowStatus: 'NOTIFY_STOCK_ADDED' });
+            return res.json({
+                success: true,
+                data: {
+                    agentResponse: agentResult,
+                    workflowStatus: 'NOTIFY_STOCK_ADDED'
+                }
+            });
         }
 
         if (trace) {
@@ -810,32 +894,26 @@ exports.chat = async (req, res) => {
             });
         }
         if (langfuse) await langfuse.flushAsync();
-        return res.json({ agentResponse: agentResult, workflowStatus: 'PROCESSED' });
-
+        return res.json({
+            success: true,
+            data: {
+                agentResponse: agentResult,
+                workflowStatus: 'PROCESSED'
+            }
+        });
     } catch (error) {
         if (trace) trace.update({ statusMessage: error.message, metadata: { error: true } });
         if (langfuse) await langfuse.flushAsync();
-        console.error("Agentic Flow Error:", error);
-
-        // Return a polite AI response instead of a generic 500
-        return res.json({
-            agentResponse: {
-                intent: 'FALLBACK',
-                answer: `I apologize, but I encountered an unexpected error: ${error.message}. Please try again in a moment.`,
-                confidence: 0,
-                items: []
-            },
-            workflowStatus: 'ERROR'
-        });
+        return next(error);
     }
-};
+});
 
-exports.speechToText = async (req, res) => {
+exports.speechToText = asyncHandler(async (req, res, next) => {
     const file = req.file;
     const { language } = req.body;
 
     if (!file) {
-        return res.status(400).json({ error: "No audio file uploaded" });
+        return next(new ErrorHandler("No audio file uploaded", 400));
     }
 
     const langMap = {
@@ -855,7 +933,6 @@ exports.speechToText = async (req, res) => {
     const targetLang = language?.toLowerCase() || 'hindi';
     const langCode = langMap[targetLang] || 'unknown';
 
-    const langfuse = require('../utils/langfuseClient');
     const trace = langfuse ? langfuse.trace({
         name: "Speech-To-Text-Service",
         userId: req.user?.id?.toString(),
@@ -864,14 +941,13 @@ exports.speechToText = async (req, res) => {
 
     try {
         const sarvamKey = process.env.SPEECH_TO_TEXT_API || process.env.SARVAM_API_KEY;
-        if (!sarvamKey) throw new Error("Sarvam API key not configured");
+        if (!sarvamKey) throw new ErrorHandler("Sarvam API key not configured", 500);
 
         const FormData = require('form-data');
-        const fs = require('fs');
         const axios = require('axios');
 
         const form = new FormData();
-        form.append('language', language); // Field order: language first
+        form.append('language', language);
         form.append('file', fs.createReadStream(file.path), {
             filename: file.originalname || 'audio.webm',
             contentType: file.mimetype
@@ -893,23 +969,24 @@ exports.speechToText = async (req, res) => {
         if (trace) trace.update({ output: transcript });
 
         // Cleanup: remove file after transcription
-        fs.unlink(file.path, (err) => { if (err) console.error("STT cleanup error:", err); });
+        fs.unlink(file.path, () => { });
 
         if (langfuse) await langfuse.flushAsync();
-        res.json({ transcript });
+        res.json({
+            success: true,
+            data: { transcript }
+        });
     } catch (error) {
-        console.error("STT Error:", error.response?.data || error.message);
-        if (trace) trace.update({ output: error.message, level: "ERROR" });
         if (file && file.path) fs.unlink(file.path, () => { });
-        res.status(500).json({ error: "Failed to transcribe audio", details: error.message });
+        if (trace) trace.update({ output: error.message, level: "ERROR" });
+        return next(error);
     }
-};
+});
 
-exports.getLogs = async (req, res) => {
-    try {
-        const logs = await AgentLog.find().sort({ timestamp: -1 });
-        res.json(logs);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-};
+exports.getLogs = asyncHandler(async (req, res, next) => {
+    const logs = await AgentLog.find().sort({ timestamp: -1 });
+    res.json({
+        success: true,
+        data: { logs }
+    });
+});

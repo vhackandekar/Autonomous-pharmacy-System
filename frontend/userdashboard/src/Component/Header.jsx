@@ -62,7 +62,7 @@ const Header = () => {
             trigger={
               <button className={`relative p-2.5 rounded-xl transition-all active:scale-95 ${theme === 'dark' ? 'hover:bg-white/5 text-slate-400' : 'hover:bg-slate-100 text-slate-500'}`}>
                 <Bell size={22} />
-                {notifications.some(n => !n.isRead && ['refill', 'order', 'prescription', 'medicine_available'].includes(n.type)) && (
+                {Array.isArray(notifications) && notifications.some(n => !n.isRead && ['refill', 'order', 'prescription', 'medicine_available'].includes(n.type)) && (
                   <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-brand-primary border-2 border-brand-card shadow-[0_0_8px_rgba(37,99,235,0.6)]" />
                 )}
 
