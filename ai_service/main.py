@@ -72,11 +72,11 @@ async def process_prescription(file: UploadFile = File(...)):
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        # 0. Resize Image to save RAM
+        # 0. Resize Image to save RAM (Aggressively sized for low-memory constraints)
         logger.info("Resizing image for memory efficiency...")
         with Image.open(temp_path) as img:
-            img.thumbnail((1000, 1000), Image.Resampling.LANCZOS)
-            img.save(temp_path, optimize=True, quality=85)
+            img.thumbnail((500, 500), Image.Resampling.LANCZOS)
+            img.save(temp_path, optimize=True, quality=70)
         
         gc.collect()
 
@@ -95,7 +95,9 @@ async def process_prescription(file: UploadFile = File(...)):
         image = Image.open(processing_path).convert("RGB")
         pixel_values = processor(images=image, return_tensors="pt").pixel_values.to(device)
         
-        generated_ids = model.generate(pixel_values)
+        with torch.no_grad(): # Disable gradient calculation to save massive amounts of RAM
+            generated_ids = model.generate(pixel_values, max_new_tokens=50)
+            
         trocr_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
         
         gc.collect()
