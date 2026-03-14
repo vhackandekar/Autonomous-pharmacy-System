@@ -11,9 +11,9 @@ const PredictiveRefillAgent = require('../Agents/PredictiveRefillAgent');
 const initCronJobs = () => {
     console.log('🚀 [SYSTEM] Initializing Automated Clinical Intelligence...');
 
-    // 1. DAILY REFILL ANALYSIS (Runs every day at 9:00 AM)
+    // 1. DAILY REFILL ANALYSIS (Runs every day at 12:00 PM)
     // Predicts when users will run out of medication and sends proactive SMS/alerts
-    cron.schedule('0 9 * * *', async () => {
+    cron.schedule('0 12 * * *', async () => {
         console.log('⏰ [SYSTEM] Running Automated Daily Refill Analysis...');
         try {
             const users = await User.find({ role: 'USER' });
@@ -29,7 +29,7 @@ const initCronJobs = () => {
         } catch (error) {
             console.error('❌ [SYSTEM] Error during Automated Daily Refill Analysis:', error.message);
         }
-    });
+    }, { timezone: "Asia/Kolkata" });
 
     // 2. DAILY PRESCRIPTION CLEANUP (Runs every day at 12:00 AM - Midnight)
     // Marks prescriptions that have passed their validity date as EXPIRED
@@ -63,7 +63,7 @@ const initCronJobs = () => {
         } catch (error) {
             console.error('❌ [SYSTEM] Error during Prescription Cleanup:', error.message);
         }
-    });
+    }, { timezone: "Asia/Kolkata" });
 
     // 3. DAILY INVENTORY AUDIT (Runs every day at 8:00 AM)
     // Alerts admins about items that dropped below reorder levels overnight
@@ -88,12 +88,12 @@ const initCronJobs = () => {
         } catch (error) {
             console.error('❌ [SYSTEM] Inventory Audit failed:', error.message);
         }
-    });
+    }, { timezone: "Asia/Kolkata" });
 
     // 4. SYSTEM HEARTBEAT (Every 1 Hour)
     cron.schedule('0 * * * *', () => {
         console.log('🛰️ [HEARTBEAT] Pharmacy Systems checking in... All cron threads ACTIVE.');
-    });
+    }, { timezone: "Asia/Kolkata" });
 
     console.log('✅ All Automated Notification Systems are ACTIVE.');
 };
